@@ -74,8 +74,8 @@ struct Row {
     history: History,
     /// The low-battery alert fired and the level has not risen above the threshold since.
     alerted: bool,
-    /// Demo mode: fixed (time left, drain, status) texts.
-    demo: Option<[&'static str; 3]>,
+    /// Demo mode: fixed (time left, status) texts.
+    demo: Option<[&'static str; 2]>,
 }
 
 /// The charge state word of a battery line like `95% level=full discharging external=none`:

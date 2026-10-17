@@ -65,7 +65,7 @@ impl Options {
                 protocol: Some((4, 2)),
                 history: hourly(&mouse),
                 alerted: false,
-                demo: Some(["≈ 41 h left", "−1.3% / h", "Discharging"]),
+                demo: Some(["≈ 41 h left", "Discharging"]),
             },
             Row {
                 sel: "0aba".into(),
@@ -76,7 +76,7 @@ impl Options {
                 protocol: Some((4, 2)),
                 history: hourly(&headset),
                 alerted: false,
-                demo: Some(["≈ 9 h left", "−4.1% / h", "Discharging"]),
+                demo: Some(["≈ 9 h left", "Discharging"]),
             },
             Row {
                 sel: "1b1c:0a73".into(),
@@ -87,7 +87,7 @@ impl Options {
                 protocol: None,
                 history: hourly(&headset[8..]),
                 alerted: false,
-                demo: Some(["≈ 6 h left", "−4.8% / h", "Discharging"]),
+                demo: Some(["≈ 6 h left", "Discharging"]),
             },
         ];
         let base = |sel: &str, name: &str| Snapshot {
