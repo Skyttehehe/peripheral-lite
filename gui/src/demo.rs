@@ -1,7 +1,7 @@
 //! `--demo`: shows sample devices (the design's two, plus a Corsair headset) without touching any hardware, for
 //! screenshots and for comparing the widget with the design. Extra flags open parts of it:
 //! `--demo-select N`, `--demo-drawer`, `--demo-skins`, `--demo-skin ID`, `--demo-all` (every
-//! optional part shown, as for users updating from 0.4.4).
+//! optional part shown, as for users updating from 0.4.4), `--demo-update` (the update bar).
 
 use peripheral_lite::corsair::Settings;
 use peripheral_lite::device::{Dpi, DpiCaps, MODE_HOST};
@@ -9,7 +9,8 @@ use peripheral_lite::watch::Snapshot;
 
 use crate::history::{self, History};
 use crate::skin::Show;
-use crate::{App, Row};
+use crate::update::Release;
+use crate::{App, Row, UpdateState};
 
 pub struct Options {
     select: usize,
@@ -17,6 +18,7 @@ pub struct Options {
     skins: bool,
     skin: Option<String>,
     all: bool,
+    update: bool,
 }
 
 impl Options {
@@ -40,6 +42,7 @@ impl Options {
             skins: args.iter().any(|a| a == "--demo-skins"),
             skin: value("--demo-skin"),
             all: args.iter().any(|a| a == "--demo-all"),
+            update: args.iter().any(|a| a == "--demo-update"),
         })
     }
 
@@ -159,6 +162,9 @@ impl Options {
         app.drawer = self.drawer;
         app.show_skins = self.skins;
         app.settings.show = Some(if self.all { Show::ALL } else { Show::default() });
+        if self.update {
+            app.update = UpdateState::Available(Release { tag: "v0.5.0".into() });
+        }
         if let Some(id) = self.skin {
             app.settings.skin = id;
         }

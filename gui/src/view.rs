@@ -27,9 +27,13 @@ const DRAWER_ROW_H: f32 = 38.0;
 /// How far the open drawer pushes the device list down.
 const DRAWER_SHIFT: f32 = DRAWER_H + 8.0;
 const DISPLAY_Y: f32 = 41.0;
+const UPDATE_BAR_H: f32 = 32.0;
 
-/// Vertical layout, y from the widget's top: display, history strip, drawer (when open), devices.
+/// Vertical layout, y from the widget's top: update bar (when shown), display, history strip,
+/// drawer (when open), devices.
 struct Layout {
+    /// How far the update bar pushes everything below it down.
+    bar_h: f32,
     display_h: f32,
     history_y: f32,
     drawer_y: f32,
@@ -37,12 +41,14 @@ struct Layout {
 }
 
 impl Layout {
-    fn new(show: Show) -> Layout {
+    fn new(show: Show, bar: bool) -> Layout {
+        let bar_h = if bar { UPDATE_BAR_H + 8.0 } else { 0.0 };
         // the details chips need a row under the percentage
         let display_h = if show.details { 127.0 } else { 100.0 };
-        let history_y = DISPLAY_Y + display_h + 8.0;
+        let history_y = bar_h + DISPLAY_Y + display_h + 8.0;
         let drawer_y = history_y + 44.0;
         Layout {
+            bar_h,
             display_h,
             history_y,
             drawer_y,
@@ -408,7 +414,8 @@ impl App {
             .animate_bool_with_time(ui.scope_id().with("drawer"), self.drawer, 0.28);
         let rows = self.rows.len().max(1) as f32;
         let list_h = 6.0 + 32.0 * rows;
-        let l = Layout::new(self.show());
+        let bar = !matches!(self.update, UpdateState::Idle);
+        let l = Layout::new(self.show(), bar);
         let h = l.devices_y + 24.0 + DRAWER_SHIFT * t + list_h + 11.0;
         let mut size = vec2(WIDGET_W, h);
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
@@ -512,7 +519,10 @@ impl App {
             }
         }
 
-        self.display(ui, &p, o, k, l, &cur);
+        if l.bar_h > 0.0 {
+            self.update_bar(ui, &p, r(11.0, DISPLAY_Y, 398.0, UPDATE_BAR_H), k);
+        }
+        self.display(ui, &p, o + vec2(0.0, l.bar_h), k, l, &cur);
         history_strip(ui, &p, o + vec2(0.0, l.history_y), k, &cur);
         self.drawer(ui, o + vec2(0.0, l.drawer_y), k, t);
 
@@ -595,36 +605,62 @@ impl App {
         }
     }
 
-    /// "Check for updates" in the settings drawer, right-aligned at `right` (its vertical
-    /// centre). Only a click asks GitHub; a newer release turns it into "Update to vX".
-    fn update_button(&mut self, ui: &mut Ui, p: &Painter, right: Pos2, k: &Skin) {
-        let (label, tip, ready) = match &self.update {
-            UpdateState::Idle => (
-                "Check for updates".to_string(),
-                format!("This is v{}. Look for a newer release on GitHub.", update::CURRENT),
-                false,
-            ),
-            UpdateState::Checking => ("Checking…".to_string(), String::new(), false),
-            UpdateState::Available(r) if update::CAN_INSTALL => (
-                format!("Update to {}", r.tag),
-                "Download it from GitHub, replace the program files and restart".to_string(),
-                true,
-            ),
-            UpdateState::Available(r) => (format!("Get {}", r.tag), r.page(), true),
-            UpdateState::Installing(r) => (format!("Updating to {}…", r.tag), String::new(), false),
+    /// The bar offering a newer release (found at start): Skip version, Not now, Update.
+    fn update_bar(&mut self, ui: &mut Ui, p: &Painter, bar: Rect, k: &Skin) {
+        lcd_box(p, bar, 8.0, k, true);
+        p.rect_stroke(bar, 8.0, Stroke::new(1.0, alpha(k.c(OK), 160)), StrokeKind::Inside);
+        let y = bar.center().y;
+        let tag = match &self.update {
+            UpdateState::Available(r) => r.tag.clone(),
+            UpdateState::Installing(r) => {
+                let s = format!("Updating to {}…", r.tag);
+                text(
+                    p,
+                    pos2(bar.left() + 12.0, y),
+                    Align2::LEFT_CENTER,
+                    &s,
+                    SANS,
+                    11.5,
+                    k.c(LCD_INK),
+                );
+                return;
+            }
+            UpdateState::Idle => return,
         };
-        let w = text_w(ui, &label, SANS, 11.0) + 18.0;
-        let rect = Rect::from_min_size(right - vec2(w, 11.0), vec2(w, 22.0));
-        let resp = click(ui, rect, "update", &tip);
-        let edge = if ready { alpha(k.c(OK), 160) } else { k.c(LCD_DIM) };
-        if resp.hovered() {
-            p.rect_filled(rect, 5.0, k.c(LO));
-        }
-        p.rect_stroke(rect, 5.0, Stroke::new(1.0, edge), StrokeKind::Inside);
-        let ink = if ready { k.c(OK) } else { k.c(LCD_INK) };
-        text(p, rect.center(), Align2::CENTER_CENTER, &label, SANS, 11.0, ink);
-        if resp.clicked() {
-            self.update_clicked(ui.ctx());
+        text(
+            p,
+            pos2(bar.left() + 12.0, y),
+            Align2::LEFT_CENTER,
+            &format!("{tag} is available"),
+            SANS,
+            11.5,
+            k.c(OK),
+        );
+        let update_tip = if update::CAN_INSTALL {
+            "Download it from GitHub, replace the program files and restart".to_string()
+        } else {
+            format!("Open the release page: {}", update::Release { tag: tag.clone() }.page())
+        };
+        let skip_tip = format!("Don't offer {tag} again");
+        let mut x = bar.right() - 5.0;
+        for (label, tip, filled) in [
+            ("Update", update_tip.as_str(), true),
+            ("Not now", "Ask again at the next start", false),
+            ("Skip version", skip_tip.as_str(), false),
+        ] {
+            let w = text_w(ui, label, SANS, 11.0) + 18.0;
+            x -= w;
+            let rect = Rect::from_min_size(pos2(x, y - 11.0), vec2(w, 22.0));
+            x -= 4.0;
+            if chip_at(ui, rect, label, SANS, 11.0, k, filled, "update")
+                .on_hover_text(tip)
+                .clicked()
+            {
+                match label {
+                    "Update" => self.update_clicked(ui.ctx()),
+                    l => self.update_dismissed(l == "Skip version"),
+                }
+            }
         }
     }
 
@@ -812,8 +848,8 @@ impl App {
         }
     }
 
-    /// The drawer's bottom row: the selected device's alert level, Tray (start at login, in
-    /// the tray) and Check for updates.
+    /// The drawer's bottom row: the selected device's alert level and Tray (start at login, in
+    /// the tray).
     fn app_settings(&mut self, ui: &mut Ui, d: Rect, k: &Skin) {
         let p = ui.painter().clone();
         let at = |x: f32| pos2(d.left() + x - 11.0, d.center().y);
@@ -888,7 +924,6 @@ impl App {
         if resp.clicked() {
             self.set_autostart(!on);
         }
-        self.update_button(ui, &p, at(397.0), k);
     }
 
     fn drawer_content(&mut self, ui: &mut Ui, d: Rect, k: &Skin) {
