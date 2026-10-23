@@ -1,5 +1,5 @@
-//! "Check for updates": asks GitHub for the newest release, only when the button is clicked
-//! (never on a timer). On Windows, "Update" downloads the release zip, checks it against its
+//! Updates: at start the app asks GitHub for the newest release (once, not on a timer) and
+//! offers a newer one in a bar. On Windows, "Update" downloads the release zip, checks it against its
 //! `.sha256`, swaps the exes next to this one (a running exe can be renamed, not overwritten:
 //! the old ones become `*.old`, removed at the next start) and the app restarts.
 //! Elsewhere it opens the release page. HTTPS goes through the system's `curl` (shipped with
@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 /// https://github.com/<owner>/<repo>
 const REPO_URL: &str = env!("CARGO_PKG_REPOSITORY");
-/// Whether `install` can replace this copy (else the button opens the release page).
+/// Whether `install` can replace this copy (else "Update" opens the release page).
 pub const CAN_INSTALL: bool = cfg!(windows);
 /// The files an update replaces, as packaged by packaging/package-windows.ps1.
 #[cfg(windows)]
