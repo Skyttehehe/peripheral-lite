@@ -13,13 +13,43 @@ use peripheral_lite::watch::Cmd;
 
 use crate::fonts::{GROTESK, MONO, MONO_SEMIBOLD, PIXEL, SANS, SANS_MEDIUM, SANS_SEMIBOLD, font};
 use crate::history::{self, BARS};
-use crate::skin::{self, BAD, Digits, FACE, FIELDS, FRAME, HI, INK, LCD, LCD_DIM, LCD_INK, LO, OK, Skin};
+use crate::skin::{self, BAD, Digits, FACE, FIELDS, FRAME, HI, INK, LCD, LCD_DIM, LCD_INK, LO, OK, Show, Skin};
 use crate::{App, UpdateState, os, update};
 
 pub const WIDGET_W: f32 = 420.0;
 const MANAGER_W: f32 = 420.0;
 const BOARD_GAP: f32 = 12.0;
-const DRAWER_H: f32 = 118.0;
+/// The settings drawer: the device's settings, then a row of optional parts and a row of app
+/// settings.
+const DRAWER_H: f32 = DEVICE_SETTINGS_H + 2.0 * DRAWER_ROW_H;
+const DEVICE_SETTINGS_H: f32 = 118.0;
+const DRAWER_ROW_H: f32 = 38.0;
+/// How far the open drawer pushes the device list down.
+const DRAWER_SHIFT: f32 = DRAWER_H + 8.0;
+const DISPLAY_Y: f32 = 41.0;
+
+/// Vertical layout, y from the widget's top: display, history strip, drawer (when open), devices.
+struct Layout {
+    display_h: f32,
+    history_y: f32,
+    drawer_y: f32,
+    devices_y: f32,
+}
+
+impl Layout {
+    fn new(show: Show) -> Layout {
+        // the details chips need a row under the percentage
+        let display_h = if show.details { 127.0 } else { 100.0 };
+        let history_y = DISPLAY_Y + display_h + 8.0;
+        let drawer_y = history_y + 44.0;
+        Layout {
+            display_h,
+            history_y,
+            drawer_y,
+            devices_y: drawer_y + 8.0,
+        }
+    }
+}
 
 // Skin manager colours (fixed, not skinned).
 const M_BG: Color32 = Color32::from_rgb(0x0d, 0x0e, 0x10);
@@ -171,18 +201,14 @@ fn click(ui: &mut Ui, rect: Rect, salt: impl std::hash::Hash + std::fmt::Debug, 
 enum Dir {
     Left,
     Right,
-    Up,
-    Down,
 }
 
-/// A small filled triangle like the design's ◀ ▶ ▾ glyphs.
+/// A small filled triangle like the design's ◀ ▶ glyphs.
 fn triangle(p: &Painter, c: Pos2, w: f32, h: f32, dir: Dir, color: Color32) {
     let (w, h) = (w / 2.0, h / 2.0);
     let pts = match dir {
         Dir::Left => vec![c + vec2(-w, 0.0), c + vec2(w, -h), c + vec2(w, h)],
         Dir::Right => vec![c + vec2(w, 0.0), c + vec2(-w, h), c + vec2(-w, -h)],
-        Dir::Up => vec![c + vec2(0.0, -h), c + vec2(w, h), c + vec2(-w, h)],
-        Dir::Down => vec![c + vec2(0.0, h), c + vec2(-w, -h), c + vec2(w, -h)],
     };
     p.add(Shape::convex_polygon(pts, color, Stroke::NONE));
 }
@@ -382,11 +408,12 @@ impl App {
             .animate_bool_with_time(ui.scope_id().with("drawer"), self.drawer, 0.28);
         let rows = self.rows.len().max(1) as f32;
         let list_h = 6.0 + 32.0 * rows;
-        let h = 286.0 + 126.0 * t + list_h + 11.0;
+        let l = Layout::new(self.show());
+        let h = l.devices_y + 24.0 + DRAWER_SHIFT * t + list_h + 11.0;
         let mut size = vec2(WIDGET_W, h);
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let o = ui.max_rect().min;
-            self.widget(ui, o, &k, t, h, list_h);
+            self.widget(ui, o, &k, &l, t, h, list_h);
             if self.show_skins {
                 // the manager sits on the design's page background, in its own rounded panel
                 let panel = Rect::from_min_size(
@@ -410,7 +437,7 @@ impl App {
     // ------------------------------------------------------------------ the widget
 
     #[allow(clippy::too_many_arguments)]
-    fn widget(&mut self, ui: &mut Ui, o: Pos2, k: &Skin, t: f32, h: f32, list_h: f32) {
+    fn widget(&mut self, ui: &mut Ui, o: Pos2, k: &Skin, l: &Layout, t: f32, h: f32, list_h: f32) {
         let cur = self.current(k);
         let at = |x: f32, y: f32| o + vec2(x, y);
         let r = |x: f32, y: f32, w: f32, hh: f32| Rect::from_min_size(o + vec2(x, y), vec2(w, hh));
@@ -452,6 +479,23 @@ impl App {
         if click(ui, name.expand(3.0), "title-name", "Skins").clicked() {
             self.show_skins = !self.show_skins;
         }
+        // settings: opens the drawer
+        let c = at(360.0, 22.0);
+        let set = Rect::from_center_size(c, vec2(18.0, 18.0));
+        let resp = click(ui, set, "settings", "Settings");
+        let lit = self.drawer || resp.hovered();
+        if lit {
+            p.rect_filled(set, 5.0, k.c(LO));
+        }
+        let ink = if lit { k.c(INK) } else { alpha(k.c(INK), 179) };
+        let ic = c - vec2(6.0, 6.0); // 12×12 icon box
+        for (y, cx) in [(3.0, 4.0), (9.0, 8.0)] {
+            p.line_segment([ic + vec2(1.5, y), ic + vec2(10.5, y)], Stroke::new(1.4, ink));
+            p.circle_filled(ic + vec2(cx, y), 2.2, ink);
+        }
+        if resp.clicked() {
+            self.drawer = !self.drawer;
+        }
         let close = if self.hides_to_tray() { "Hide to tray" } else { "Quit" };
         for (i, (x, hover, tip)) in [(381.0, HI, "Minimise"), (399.0, BAD, close)].into_iter().enumerate() {
             let c = at(x, 22.0);
@@ -467,16 +511,13 @@ impl App {
                 ui.ctx().send_viewport_cmd(cmd);
             }
         }
-        self.update_button(ui, &p, at(368.0, 22.0), k);
 
-        self.display(ui, &p, o, k, &cur);
-        gauge(&p, o, k, &cur);
-        history_strip(ui, &p, o, k, &cur);
-        self.controls(ui, &p, o, k, &cur);
-        self.drawer(ui, o, k, t);
+        self.display(ui, &p, o, k, l, &cur);
+        history_strip(ui, &p, o + vec2(0.0, l.history_y), k, &cur);
+        self.drawer(ui, o + vec2(0.0, l.drawer_y), k, t);
 
         // devices
-        let top = 262.0 + 126.0 * t;
+        let top = l.devices_y + DRAWER_SHIFT * t;
         spaced(
             &p,
             at(15.0, top + 9.0),
@@ -487,8 +528,16 @@ impl App {
             alpha(k.c(INK), 179),
             0.84,
         );
-        p.line_segment([at(73.0, top + 9.5), at(405.0, top + 9.5)], Stroke::new(1.0, k.c(LO)));
-        let list = r(11.0, 286.0 + 126.0 * t, 398.0, list_h);
+        let nav = self.show().nav;
+        let line_end = if nav { 349.0 } else { 405.0 };
+        p.line_segment(
+            [at(73.0, top + 9.5), at(line_end, top + 9.5)],
+            Stroke::new(1.0, k.c(LO)),
+        );
+        if nav {
+            self.nav_buttons(ui, &p, at(357.0, top + 0.5), k);
+        }
+        let list = r(11.0, top + 24.0, 398.0, list_h);
         self.device_list(ui, &p, list, k);
 
         // transient message over the bottom of the list
@@ -516,8 +565,38 @@ impl App {
         }
     }
 
-    /// "Check for updates" in the title bar, right-aligned at `right` (its vertical centre).
-    /// Only a click asks GitHub; a newer release turns it into "Update to vX".
+    /// ◀ ▶ (optional): previous / next device, from `min` (top left).
+    fn nav_buttons(&mut self, ui: &mut Ui, p: &Painter, min: Pos2, k: &Skin) {
+        let n = self.rows.len();
+        let idx = self
+            .selected
+            .as_ref()
+            .and_then(|s| self.rows.iter().position(|r| &r.sel == s));
+        for (x, dir, tip, step) in [
+            (0.0, Dir::Left, "Previous device", n.saturating_sub(1)),
+            (28.0, Dir::Right, "Next device", 1),
+        ] {
+            let rect = Rect::from_min_size(min + vec2(x, 0.0), vec2(24.0, 18.0));
+            let resp = click(ui, rect, ("nav", x as i32), tip);
+            raised(
+                p,
+                rect,
+                6.0,
+                k.c(FACE),
+                k,
+                true,
+                if resp.hovered() { 1.15 } else { 1.0 },
+            );
+            triangle(p, rect.center() + vec2(0.0, 0.5), 6.0, 6.0, dir, k.c(INK));
+            if resp.clicked() && n > 0 {
+                let i = idx.map_or(0, |i| (i + step) % n);
+                self.select(self.rows[i].sel.clone());
+            }
+        }
+    }
+
+    /// "Check for updates" in the settings drawer, right-aligned at `right` (its vertical
+    /// centre). Only a click asks GitHub; a newer release turns it into "Update to vX".
     fn update_button(&mut self, ui: &mut Ui, p: &Painter, right: Pos2, k: &Skin) {
         let (label, tip, ready) = match &self.update {
             UpdateState::Idle => (
@@ -534,40 +613,48 @@ impl App {
             UpdateState::Available(r) => (format!("Get {}", r.tag), r.page(), true),
             UpdateState::Installing(r) => (format!("Updating to {}…", r.tag), String::new(), false),
         };
-        let w = text_w(ui, &label, SANS_MEDIUM, 10.5) + 14.0;
-        let rect = Rect::from_min_size(right - vec2(w, 9.0), vec2(w, 18.0));
+        let w = text_w(ui, &label, SANS, 11.0) + 18.0;
+        let rect = Rect::from_min_size(right - vec2(w, 11.0), vec2(w, 22.0));
         let resp = click(ui, rect, "update", &tip);
-        let ink = if ready { k.c(OK) } else { alpha(k.c(INK), 179) };
-        if ready || resp.hovered() {
+        let edge = if ready { alpha(k.c(OK), 160) } else { k.c(LCD_DIM) };
+        if resp.hovered() {
             p.rect_filled(rect, 5.0, k.c(LO));
         }
-        if ready {
-            p.rect_stroke(rect, 5.0, Stroke::new(1.0, alpha(k.c(OK), 160)), StrokeKind::Inside);
-        }
-        text(p, rect.center(), Align2::CENTER_CENTER, &label, SANS_MEDIUM, 10.5, ink);
+        p.rect_stroke(rect, 5.0, Stroke::new(1.0, edge), StrokeKind::Inside);
+        let ink = if ready { k.c(OK) } else { k.c(LCD_INK) };
+        text(p, rect.center(), Align2::CENTER_CENTER, &label, SANS, 11.0, ink);
         if resp.clicked() {
             self.update_clicked(ui.ctx());
         }
     }
 
-    fn display(&mut self, ui: &mut Ui, p: &Painter, o: Pos2, k: &Skin, cur: &Cur) {
+    fn display(&mut self, ui: &mut Ui, p: &Painter, o: Pos2, k: &Skin, l: &Layout, cur: &Cur) {
         let at = |x: f32, y: f32| o + vec2(x, y);
+        let show = self.show();
         lcd_box(
             p,
-            Rect::from_min_size(at(11.0, 41.0), vec2(362.0, 127.0)),
+            Rect::from_min_size(at(11.0, DISPLAY_Y), vec2(398.0, l.display_h)),
             10.0,
             k,
             true,
         );
-        // header
-        let conn = cur.conn.to_uppercase();
-        let conn_w = text_w(ui, &conn, MONO, 10.5) + 0.63 * conn.chars().count() as f32;
+        // header: name, and the connection right-aligned (optional)
+        let conn = if show.conn {
+            cur.conn.to_uppercase()
+        } else {
+            String::new()
+        };
+        let conn_w = if conn.is_empty() {
+            0.0
+        } else {
+            text_w(ui, &conn, MONO, 10.5) + 0.63 * conn.chars().count() as f32 + 8.0
+        };
         let name = elide(
             ui,
             &cur.name.to_uppercase(),
             MONO,
             10.5,
-            334.0 - conn_w - 8.0 - 0.63 * cur.name.len() as f32,
+            370.0 - conn_w - 0.63 * cur.name.len() as f32,
         );
         spaced(
             p,
@@ -579,22 +666,25 @@ impl App {
             k.c(LCD_INK),
             0.63,
         );
-        spaced(
-            p,
-            at(359.0, 60.0),
-            Align2::RIGHT_CENTER,
-            &conn,
-            MONO,
-            10.5,
-            k.c(LCD_DIM),
-            0.63,
-        );
-        // the percentage: its 54 px line box ends at y 129
+        if !conn.is_empty() {
+            spaced(
+                p,
+                at(395.0, 60.0),
+                Align2::RIGHT_CENTER,
+                &conn,
+                MONO,
+                10.5,
+                k.c(LCD_DIM),
+                0.63,
+            );
+        }
+        gauge(p, Rect::from_min_max(at(25.0, 74.0), at(39.0, 128.0)), k, cur);
+        // the percentage, right of the gauge: its 54 px line box ends at y 129
         let label = cur.pct.map_or_else(|| "--".to_string(), |v| format!("{v}%"));
         match k.digits {
             Digits::Grotesk => glow_text(
                 p,
-                at(26.0, 140.0),
+                at(52.0, 140.0),
                 Align2::LEFT_BOTTOM,
                 &label,
                 GROTESK,
@@ -604,7 +694,7 @@ impl App {
             ),
             Digits::Mono => glow_text(
                 p,
-                at(26.0, 140.0),
+                at(52.0, 140.0),
                 Align2::LEFT_BOTTOM,
                 &label,
                 MONO_SEMIBOLD,
@@ -614,7 +704,7 @@ impl App {
             ),
             Digits::Pixel => glow_text(
                 p,
-                at(24.5, 132.5),
+                at(50.5, 132.5),
                 Align2::LEFT_BOTTOM,
                 &label,
                 PIXEL,
@@ -623,39 +713,25 @@ impl App {
                 true,
             ),
         }
-        // detail lines, right-aligned
-        text(
-            p,
-            at(359.0, 88.5),
-            Align2::RIGHT_CENTER,
-            &cur.time_left,
-            MONO,
-            11.5,
-            k.c(LCD_INK),
-        );
-        text(
-            p,
-            at(359.0, 104.5),
-            Align2::RIGHT_CENTER,
-            &cur.drain,
-            MONO,
-            11.5,
-            k.c(LCD_DIM),
-        );
-        text(
-            p,
-            at(359.0, 121.5),
-            Align2::RIGHT_CENTER,
-            &cur.status,
-            MONO,
-            11.5,
-            k.c(LCD_DIM),
-        );
-        // chips
+        // detail lines, right-aligned, centred on the digits; the drain line is optional
+        let mut lines = vec![(&cur.time_left, k.c(LCD_INK))];
+        if show.drain {
+            lines.push((&cur.drain, k.c(LCD_DIM)));
+        }
+        lines.push((&cur.status, k.c(LCD_DIM)));
+        let n = lines.len() as f32;
+        for (i, (s, c)) in lines.into_iter().enumerate() {
+            let y = 101.5 + (i as f32 - (n - 1.0) / 2.0) * 17.0;
+            text(p, at(395.0, y), Align2::RIGHT_CENTER, s, MONO, 11.5, c);
+        }
+        // details chips under the percentage (optional)
+        if !show.details {
+            return;
+        }
         let mut x = 25.0;
         for c in &cur.chips {
             let w = text_w(ui, c, MONO, 10.0) + 14.0;
-            if x + w > 359.0 {
+            if x + w > 395.0 {
                 break;
             }
             let rect = Rect::from_min_size(at(x, 137.0), vec2(w, 19.0));
@@ -673,164 +749,146 @@ impl App {
         }
     }
 
-    fn controls(&mut self, ui: &mut Ui, p: &Painter, o: Pos2, k: &Skin, cur: &Cur) {
-        let r = |x: f32, w: f32| Rect::from_min_size(o + vec2(x, 228.0), vec2(w, 26.0));
-        let cy = o.y + 241.0;
-        let n = self.rows.len();
-        let idx = self
-            .selected
-            .as_ref()
-            .and_then(|s| self.rows.iter().position(|r| &r.sel == s));
-        for (x, dir, tip, step) in [
-            (11.0, Dir::Left, "Previous device", n.saturating_sub(1)),
-            (47.0, Dir::Right, "Next device", 1),
-        ] {
-            let rect = r(x, 30.0);
-            let resp = click(ui, rect, ("nav", x as i32), tip);
-            raised(
-                p,
-                rect,
-                7.0,
-                k.c(FACE),
-                k,
-                true,
-                if resp.hovered() { 1.15 } else { 1.0 },
-            );
-            triangle(p, rect.center() + vec2(0.0, 0.5), 7.0, 7.0, dir, k.c(INK));
-            if resp.clicked() && n > 0 {
-                let i = idx.map_or(0, |i| (i + step) % n);
-                self.select(self.rows[i].sel.clone());
-            }
-        }
-        // alert level
-        text(
-            p,
-            pos2(o.x + 133.0, cy),
-            Align2::LEFT_CENTER,
-            "Alert at",
-            SANS_MEDIUM,
-            11.0,
-            alpha(k.c(INK), 204),
-        );
-        let step = r(177.0, 78.0);
-        p.rect_filled(step, 7.0, k.c(LCD));
-        p.rect_stroke(step, 7.0, Stroke::new(1.0, k.c(LO)), StrokeKind::Inside);
-        let sel = self.selected.clone();
-        for (x, label, delta) in [(177.0, "−", -5i16), (233.0, "+", 5)] {
-            let zone = r(x, 22.0);
-            let resp = click(ui, zone, ("alert", label), "");
-            if resp.hovered() {
-                let cr = if x < 200.0 {
-                    egui::CornerRadius {
-                        nw: 7,
-                        sw: 7,
-                        ne: 0,
-                        se: 0,
-                    }
-                } else {
-                    egui::CornerRadius {
-                        nw: 0,
-                        sw: 0,
-                        ne: 7,
-                        se: 7,
-                    }
-                };
-                p.rect_filled(zone, cr, k.c(LO));
-            }
-            text(
-                p,
-                zone.center(),
-                Align2::CENTER_CENTER,
-                label,
-                SANS_MEDIUM,
-                11.0,
-                k.c(LCD_INK),
-            );
-            if resp.clicked()
-                && let Some(sel) = &sel
-            {
-                let v = (cur.alert as i16 + delta).clamp(5, 50) as u8;
-                self.settings.set_alert(sel, v);
-                self.save_settings();
-            }
-        }
-        text(
-            p,
-            pos2(o.x + 216.0, cy + 0.5),
-            Align2::CENTER_CENTER,
-            &format!("{}%", cur.alert),
-            MONO,
-            11.5,
-            k.c(BAD),
-        );
-        // tray = start at login
-        let tray = r(261.0, 52.0);
-        let resp = click(ui, tray, "tray", "Start at login, in the tray");
-        raised(
-            p,
-            tray,
-            7.0,
-            k.c(FACE),
-            k,
-            true,
-            if resp.hovered() { 1.15 } else { 1.0 },
-        );
-        let on = self.autostart_gui;
-        let led = Rect::from_center_size(pos2(o.x + 273.0, cy), vec2(6.0, 6.0));
-        if on {
-            glow(p, led, 3.0, 5, k.c(OK));
-        }
-        p.circle_filled(led.center(), 3.0, if on { k.c(OK) } else { k.c(LO) });
-        text(
-            p,
-            pos2(o.x + 282.0, cy),
-            Align2::LEFT_CENTER,
-            "Tray",
-            SANS_MEDIUM,
-            11.0,
-            k.c(INK),
-        );
-        if resp.clicked() {
-            self.set_autostart(!on);
-        }
-        // settings drawer
-        let set = r(318.0, 91.0);
-        let resp = click(ui, set, "settings", "Device settings");
-        let fill = if self.drawer { k.c(LO) } else { k.c(FACE) };
-        raised(p, set, 7.0, fill, k, true, if resp.hovered() { 1.15 } else { 1.0 });
-        let ink = k.c(INK);
-        let ic = pos2(o.x + 327.0, cy - 6.0); // 12×12 icon box
-        for (y, cx) in [(3.0, 4.0), (9.0, 8.0)] {
-            p.line_segment([ic + vec2(1.5, y), ic + vec2(10.5, y)], Stroke::new(1.4, ink));
-            p.circle_filled(ic + vec2(cx, y), 2.2, ink);
-        }
-        text(
-            p,
-            pos2(o.x + 345.0, cy),
-            Align2::LEFT_CENTER,
-            "Settings",
-            SANS_MEDIUM,
-            11.0,
-            ink,
-        );
-        let dir = if self.drawer { Dir::Up } else { Dir::Down };
-        triangle(p, pos2(o.x + 396.0, cy + 1.0), 6.0, 4.0, dir, alpha(ink, 179));
-        if resp.clicked() {
-            self.drawer = !self.drawer;
-        }
-    }
-
     fn drawer(&mut self, ui: &mut Ui, o: Pos2, k: &Skin, t: f32) {
         if t <= 0.0 {
             return;
         }
-        let top = o.y + 254.0 + 8.0 * t;
+        let top = o.y + 8.0 * t;
         let full = Rect::from_min_size(pos2(o.x + 11.0, top), vec2(398.0, DRAWER_H));
         let visible = Rect::from_min_size(full.min, vec2(398.0, DRAWER_H * t));
         let mut c = ui.new_child(UiBuilder::new().max_rect(full));
         c.set_clip_rect(visible.intersect(ui.clip_rect()));
         lcd_box(c.painter(), full, 10.0, k, false);
-        self.drawer_content(&mut c, full, k);
+        let (device, rest) = full.split_top_bottom_at_y(top + DEVICE_SETTINGS_H);
+        let (show, app) = rest.split_top_bottom_at_y(rest.top() + DRAWER_ROW_H);
+        self.drawer_content(&mut c, device, k);
+        self.show_settings(&mut c, show, k);
+        self.app_settings(&mut c, app, k);
+    }
+
+    /// The drawer's row of optional widget parts, each a chip that toggles it.
+    fn show_settings(&mut self, ui: &mut Ui, d: Rect, k: &Skin) {
+        let p = ui.painter().clone();
+        p.line_segment(
+            [pos2(d.left() + 12.0, d.top()), pos2(d.right() - 12.0, d.top())],
+            Stroke::new(1.0, k.c(LO)),
+        );
+        text(
+            &p,
+            pos2(d.left() + 12.0, d.center().y),
+            Align2::LEFT_CENTER,
+            "Show",
+            SANS,
+            11.5,
+            k.c(LCD_DIM),
+        );
+        let mut show = self.show();
+        let mut x = d.left() + 61.0;
+        let mut changed = false;
+        for (label, on, tip) in [
+            ("Arrows", &mut show.nav, "Previous / next device buttons beside Devices"),
+            ("Connection", &mut show.conn, "The connection in the display header"),
+            (
+                "Details",
+                &mut show.details,
+                "Voltage or HID++ version, curve source and selector under the percentage",
+            ),
+            ("Drain", &mut show.drain, "Battery drain per hour in the display"),
+        ] {
+            let w = text_w(ui, label, SANS, 11.0) + 18.0;
+            let rect = Rect::from_min_size(pos2(x, d.center().y - 11.0), vec2(w, 22.0));
+            if chip_at(ui, rect, label, SANS, 11.0, k, *on, "show")
+                .on_hover_text(tip)
+                .clicked()
+            {
+                *on = !*on;
+                changed = true;
+            }
+            x += w + 4.0;
+        }
+        if changed {
+            self.settings.show = Some(show);
+            self.save_settings();
+        }
+    }
+
+    /// The drawer's bottom row: the selected device's alert level, Tray (start at login, in
+    /// the tray) and Check for updates.
+    fn app_settings(&mut self, ui: &mut Ui, d: Rect, k: &Skin) {
+        let p = ui.painter().clone();
+        let at = |x: f32| pos2(d.left() + x - 11.0, d.center().y);
+        let (ink, dim) = (k.c(LCD_INK), k.c(LCD_DIM));
+        p.line_segment(
+            [pos2(d.left() + 12.0, d.top()), pos2(d.right() - 12.0, d.top())],
+            Stroke::new(1.0, k.c(LO)),
+        );
+        // alert level of the selected device
+        let sel = self.selected.clone();
+        let alert = sel.as_ref().map_or(20, |s| self.alert_level(s));
+        text(&p, at(23.0), Align2::LEFT_CENTER, "Alert at", SANS, 11.5, dim);
+        let step = Rect::from_center_size(at(111.0), vec2(78.0, 22.0));
+        p.rect_stroke(step, 6.0, Stroke::new(1.0, dim), StrokeKind::Inside);
+        for (label, delta, zone) in [
+            ("−", -5i16, Rect::from_min_size(step.min, vec2(22.0, 22.0))),
+            (
+                "+",
+                5,
+                Rect::from_min_size(step.right_top() - vec2(22.0, 0.0), vec2(22.0, 22.0)),
+            ),
+        ] {
+            let resp = click(ui, zone, ("alert", label), "Low-battery alert for this device");
+            if resp.hovered() {
+                p.rect_filled(zone.shrink(1.0), 5.0, k.c(LO));
+            }
+            text(&p, zone.center(), Align2::CENTER_CENTER, label, SANS_MEDIUM, 11.0, ink);
+            if resp.clicked()
+                && let Some(sel) = &sel
+            {
+                let v = (alert as i16 + delta).clamp(5, 50) as u8;
+                self.settings.set_alert(sel, v);
+                self.save_settings();
+            }
+        }
+        let value = if sel.is_some() {
+            format!("{alert}%")
+        } else {
+            "—".into()
+        };
+        text(
+            &p,
+            step.center() + vec2(0.0, 0.5),
+            Align2::CENTER_CENTER,
+            &value,
+            MONO,
+            11.5,
+            k.c(BAD),
+        );
+        // tray = start at login
+        let tray = Rect::from_min_size(at(162.0) - vec2(0.0, 11.0), vec2(56.0, 22.0));
+        let resp = click(ui, tray, "tray", "Start at login, in the tray");
+        if resp.hovered() {
+            p.rect_filled(tray, 5.0, k.c(LO));
+        }
+        p.rect_stroke(tray, 5.0, Stroke::new(1.0, dim), StrokeKind::Inside);
+        let on = self.autostart_gui;
+        let led = Rect::from_center_size(tray.left_center() + vec2(12.0, 0.0), vec2(6.0, 6.0));
+        if on {
+            glow(&p, led, 3.0, 5, k.c(OK));
+        }
+        p.circle_filled(led.center(), 3.0, if on { k.c(OK) } else { dim });
+        text(
+            &p,
+            tray.left_center() + vec2(21.0, 0.0),
+            Align2::LEFT_CENTER,
+            "Tray",
+            SANS,
+            11.0,
+            ink,
+        );
+        if resp.clicked() {
+            self.set_autostart(!on);
+        }
+        self.update_button(ui, &p, at(397.0), k);
     }
 
     fn drawer_content(&mut self, ui: &mut Ui, d: Rect, k: &Skin) {
@@ -1549,31 +1607,31 @@ impl App {
 
 // ---------------------------------------------------------------------- painted parts
 
-fn gauge(p: &Painter, o: Pos2, k: &Skin, cur: &Cur) {
-    let rect = Rect::from_min_size(o + vec2(381.0, 41.0), vec2(28.0, 127.0));
-    lcd_box(p, rect, 10.0, k, true);
-    let (top, bottom) = (rect.top() + 6.0, rect.bottom() - 6.0);
-    let gap = 3.0;
-    let seg_h = (bottom - top - gap * 9.0) / 10.0;
+/// The segment gauge left of the percentage: one segment per 10 %, the alert level as a red
+/// line across it.
+fn gauge(p: &Painter, rect: Rect, k: &Skin, cur: &Cur) {
+    let gap = 1.5;
+    let seg_h = (rect.height() - gap * 9.0) / 10.0;
     let lit = cur.pct.map_or(0, |v| ((v as u32 + 5) / 10) as usize);
     for i in 0..10 {
-        let y = bottom - (i as f32 + 1.0) * seg_h - i as f32 * gap;
-        let r = Rect::from_min_size(pos2(rect.left() + 6.0, y), vec2(16.0, seg_h));
+        let y = rect.bottom() - (i as f32 + 1.0) * seg_h - i as f32 * gap;
+        let r = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), seg_h));
         if i < lit {
-            glow(p, r, 2.0, 5, alpha(cur.color, 102));
-            p.rect_filled(r, 2.0, cur.color);
+            glow(p, r, 1.5, 5, alpha(cur.color, 102));
+            p.rect_filled(r, 1.5, cur.color);
         } else {
-            p.rect_filled(r, 2.0, k.c(LO));
+            p.rect_filled(r, 1.5, k.c(LO));
         }
     }
-    let y = rect.bottom() - 5.0 - (rect.height() - 12.0) * cur.alert as f32 / 100.0 - 2.0;
-    let line = Rect::from_min_size(pos2(rect.left() + 2.0, y), vec2(24.0, 2.0));
+    let y = rect.bottom() - rect.height() * cur.alert as f32 / 100.0 - 1.0;
+    let line = Rect::from_min_size(pos2(rect.left() - 3.0, y), vec2(rect.width() + 6.0, 2.0));
     glow(p, line, 1.0, 6, k.c(BAD));
     p.rect_filled(line, 1.0, k.c(BAD));
 }
 
+/// The history strip, its top at `o.y`.
 fn history_strip(ui: &mut Ui, p: &Painter, o: Pos2, k: &Skin, cur: &Cur) {
-    let rect = Rect::from_min_size(o + vec2(11.0, 176.0), vec2(398.0, 44.0));
+    let rect = Rect::from_min_size(o + vec2(11.0, 0.0), vec2(398.0, 44.0));
     lcd_box(p, rect, 8.0, k, true);
     let inner = Rect::from_min_max(rect.min + vec2(6.0, 5.0), rect.max - vec2(6.0, 5.0));
     let gap = 2.0;

@@ -1,12 +1,14 @@
 //! `--demo`: shows sample devices (the design's two, plus a Corsair headset) without touching any hardware, for
 //! screenshots and for comparing the widget with the design. Extra flags open parts of it:
-//! `--demo-select N`, `--demo-drawer`, `--demo-skins`, `--demo-skin ID`.
+//! `--demo-select N`, `--demo-drawer`, `--demo-skins`, `--demo-skin ID`, `--demo-all` (every
+//! optional part shown, as for users updating from 0.4.4).
 
 use peripheral_lite::corsair::Settings;
 use peripheral_lite::device::{Dpi, DpiCaps, MODE_HOST};
 use peripheral_lite::watch::Snapshot;
 
 use crate::history::{self, History};
+use crate::skin::Show;
 use crate::{App, Row};
 
 pub struct Options {
@@ -14,6 +16,7 @@ pub struct Options {
     drawer: bool,
     skins: bool,
     skin: Option<String>,
+    all: bool,
 }
 
 impl Options {
@@ -36,6 +39,7 @@ impl Options {
             drawer: args.iter().any(|a| a == "--demo-drawer"),
             skins: args.iter().any(|a| a == "--demo-skins"),
             skin: value("--demo-skin"),
+            all: args.iter().any(|a| a == "--demo-all"),
         })
     }
 
@@ -154,6 +158,7 @@ impl Options {
         app.dpi_input = "800".into();
         app.drawer = self.drawer;
         app.show_skins = self.skins;
+        app.settings.show = Some(if self.all { Show::ALL } else { Show::default() });
         if let Some(id) = self.skin {
             app.settings.skin = id;
         }

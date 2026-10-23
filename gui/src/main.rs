@@ -19,7 +19,7 @@ mod tray;
 mod update;
 mod view;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -31,7 +31,7 @@ use peripheral_lite::device::{Event, MODE_ONBOARD};
 use peripheral_lite::hid::Waker;
 use peripheral_lite::watch::{Cmd, Monitor, Snapshot, Update};
 use peripheral_lite::{autostart, battery, config, hidpp, migrate, platform};
-use skin::{Settings, Skin};
+use skin::{Settings, Show, Skin};
 
 const TITLE: &str = "peripheral-lite";
 /// Messages under the controls disappear after this long.
@@ -228,6 +228,18 @@ fn main() {
     );
 }
 
+/// An earlier version of the app ran with this folder: it left app settings or battery history.
+fn used_before(dir: &Path) -> bool {
+    dir.join("app.txt").exists()
+        || std::fs::read_dir(dir).is_ok_and(|d| {
+            d.flatten().any(|e| {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with("history-") && name.ends_with(".csv")
+            })
+        })
+}
+
 /// The single-instance lock. Right after an update the old copy is still exiting: wait for it.
 fn instance_lock(updated: bool) -> Option<platform::InstanceLock> {
     let until = Instant::now() + Duration::from_secs(if updated { 10 } else { 0 });
@@ -286,8 +298,14 @@ impl App {
             .is_some_and(|c| c.contains("peripheral-lite-gui"));
         let mut skins = skin::builtins();
         skins.extend(skin::load_custom(&dir.join("skins")));
-        let settings = Settings::load(&dir.join("app.txt"));
-        App {
+        let mut settings = Settings::load(&dir.join("app.txt"));
+        // First start of a version with optional parts: an update keeps them, a new install
+        // starts without. Saved right away, so the choice sticks.
+        let decide_show = !demo && settings.show.is_none();
+        if decide_show {
+            settings.show = Some(if used_before(&dir) { Show::ALL } else { Show::default() });
+        }
+        let mut app = App {
             tx,
             rx,
             waker,
@@ -321,7 +339,16 @@ impl App {
             manager_h: 720.0,
             update: UpdateState::Idle,
             update_rx: None,
+        };
+        if decide_show {
+            app.save_settings();
         }
+        app
+    }
+
+    /// The optional parts of the widget that are shown.
+    fn show(&self) -> Show {
+        self.settings.show.unwrap_or_default()
     }
 
     fn skin(&self) -> &Skin {

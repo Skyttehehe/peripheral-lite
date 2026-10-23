@@ -94,23 +94,30 @@ Manager → Startup apps).
 
 Double-click **`peripheral-lite-gui.exe`**. It opens a small battery widget:
 
-- **The display** shows the selected device: battery percentage, time left, drain per hour,
-  charging state and details such as the connection and, for headsets, the voltage and where
-  the percentage comes from (see [Headset battery percentage](#headset-battery-percentage)).
-  The segment gauge on the right and the **history** strip below show the level; the history
-  has one bar per hour for the last 24 hours. Drain and time left appear after about an hour
-  of readings.
-- **◀ ▶** or a click in the **Devices** list switches device.
-- **Alert at** sets the low-battery level for this device (red line). When a device on battery
-  drops to it, the widget pops up and its bar in the tray icon turns red.
-- **Tray** starts the app at login, in the tray, so presets are applied from login on. That
-  replaces the command-line `autostart` entry, so only one of them runs.
-- **Settings** opens the device drawer. For a mouse: **DPI** (type a value, **Apply**),
-  **report rate** and **mode**. "Onboard profile" means the mouse uses settings stored inside
-  it; **Use host** lets this PC set DPI and rate. Every change is read back from the device and
-  saved as the mouse's preset, so it is applied again whenever the mouse connects; **Use
-  onboard** goes back and removes the preset. For a headset: the battery curve and its
-  recording.
+- **The display** shows the selected device: battery percentage, time left and charging
+  state. The segment gauge left of the percentage and the **history** strip below show the
+  level; the history has one bar per hour for the last 24 hours. Time left appears after about
+  an hour of readings.
+- A click in the **Devices** list switches device.
+- The **settings** button (the sliders icon in the title bar) opens the settings drawer. For a
+  mouse: **DPI** (type a value, **Apply**), **report rate** and **mode**. "Onboard profile"
+  means the mouse uses settings stored inside it; **Use host** lets this PC set DPI and rate.
+  Every change is read back from the device and saved as the mouse's preset, so it is applied
+  again whenever the mouse connects; **Use onboard** goes back and removes the preset. For a
+  headset: where its battery percentage comes from (see
+  [Headset battery percentage](#headset-battery-percentage)), the battery curve and its
+  recording. Below that, for every device:
+  - **Alert at** sets the low-battery level for this device (red line). When a device on
+    battery drops to it, the widget pops up and its bar in the tray icon turns red.
+  - **Show** turns optional parts of the widget on or off: **Arrows** (◀ ▶ buttons next to
+    Devices that switch device), **Connection** (USB receiver, receiver slot, Bluetooth or
+    Corsair dongle in the display header), **Details** (voltage or HID++ version, where the
+    percentage comes from and the device selector, as chips under the percentage) and
+    **Drain** (battery drain per hour). They are off on a new install; updating from 0.4.4 or
+    earlier keeps them on, as those versions always showed them.
+  - **Tray** starts the app at login, in the tray, so presets are applied from login on. That
+    replaces the command-line `autostart` entry, so only one of them runs.
+  - **Check for updates** (see below).
 
   <p align="center"><img src="docs/screenshots/drawer-mouse.png" width="380" alt="Settings drawer for a mouse: DPI, report rate, mode"> <img src="docs/screenshots/drawer-headset.png" width="380" alt="Settings drawer for a headset: battery curve"></p>
 
@@ -126,7 +133,7 @@ it. With **Tray** on, closing hides the widget to the **tray** (on Linux under W
 minimised instead, as Wayland cannot hide a window) and the tray menu's **Quit** exits; with
 **Tray** off, closing quits the app.
 
-**Check for updates** in the title bar asks GitHub for a newer release, only when you click it
+**Check for updates** in the settings drawer asks GitHub for a newer release, only when you click it
 (the app never checks on its own). If there is one, the button becomes **Update to vX.Y.Z**; on
 Windows that downloads the release zip, verifies its SHA-256, replaces `peripheral-lite-gui.exe`,
 `peripheral-lite.exe` and `peripheral-lite-bg.exe` in the app's folder and restarts the app. On Linux and
