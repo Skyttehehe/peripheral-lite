@@ -49,10 +49,9 @@ enum FromWorker {
     Fatal(String),
 }
 
-/// The update button: what it shows and does next.
+/// The update bar under the title: hidden (Idle), offering a release, or installing it.
 pub enum UpdateState {
     Idle,
-    Checking,
     Available(update::Release),
     Installing(update::Release),
 }
@@ -220,8 +219,9 @@ fn main() {
             if !migrated.is_empty() {
                 app.say(false, migrated.join("; "));
             }
-            if let Some(d) = demo {
-                d.apply(&mut app);
+            match demo {
+                Some(d) => d.apply(&mut app),
+                None => app.check_for_update(&cc.egui_ctx),
             }
             Ok(Box::new(app))
         }),
@@ -667,39 +667,52 @@ impl App {
 }
 
 impl App {
-    /// The update button was clicked: check, install, or (where installing is not supported)
-    /// open the release page. Each step runs on its own thread; `poll_update` takes the result.
-    pub fn update_clicked(&mut self, ctx: &egui::Context) {
+    /// Ask GitHub for a newer release, once at start, on its own thread; `poll_update` takes
+    /// the result and shows the update bar unless that release was skipped.
+    fn check_for_update(&mut self, ctx: &egui::Context) {
         let (tx, rx) = channel();
         let ctx = ctx.clone();
-        match std::mem::replace(&mut self.update, UpdateState::Idle) {
-            UpdateState::Idle => {
-                self.update = UpdateState::Checking;
-                std::thread::spawn(move || {
-                    let _ = tx.send(UpdateMsg::Checked(update::check()));
-                    ctx.request_repaint();
-                });
-            }
-            UpdateState::Available(r) if update::CAN_INSTALL => {
-                self.update = UpdateState::Installing(r.clone());
-                self.say(false, format!("Downloading {}…", r.tag));
-                std::thread::spawn(move || {
-                    let res = update::install_dir().and_then(|dir| update::install(&r, &dir));
-                    let _ = tx.send(UpdateMsg::Installed(r, res));
-                    ctx.request_repaint();
-                });
-            }
-            UpdateState::Available(r) => {
-                update::open_page(&r);
-                self.update = UpdateState::Available(r);
-                return;
-            }
-            busy => {
-                self.update = busy;
-                return;
-            }
-        }
+        std::thread::spawn(move || {
+            let _ = tx.send(UpdateMsg::Checked(update::check()));
+            ctx.request_repaint();
+        });
         self.update_rx = Some(rx);
+    }
+
+    /// "Update" in the update bar: install and restart, or (where installing is not supported)
+    /// open the release page.
+    pub fn update_clicked(&mut self, ctx: &egui::Context) {
+        let UpdateState::Available(r) = std::mem::replace(&mut self.update, UpdateState::Idle) else {
+            return;
+        };
+        if self.demo.is_some() {
+            self.say(false, format!("Demo: would update to {}", r.tag));
+            self.update = UpdateState::Available(r);
+            return;
+        }
+        if !update::CAN_INSTALL {
+            update::open_page(&r);
+            return;
+        }
+        let (tx, rx) = channel();
+        let ctx = ctx.clone();
+        self.update = UpdateState::Installing(r.clone());
+        std::thread::spawn(move || {
+            let res = update::install_dir().and_then(|dir| update::install(&r, &dir));
+            let _ = tx.send(UpdateMsg::Installed(r, res));
+            ctx.request_repaint();
+        });
+        self.update_rx = Some(rx);
+    }
+
+    /// "Not now" hides the bar until the next start; "Skip version" until a newer release.
+    pub fn update_dismissed(&mut self, skip: bool) {
+        if let UpdateState::Available(r) = std::mem::replace(&mut self.update, UpdateState::Idle)
+            && skip
+        {
+            self.settings.skip = r.tag;
+            self.save_settings();
+        }
     }
 
     fn poll_update(&mut self, ctx: &egui::Context) {
@@ -708,25 +721,12 @@ impl App {
         };
         self.update_rx = None;
         match msg {
-            UpdateMsg::Checked(Ok(None)) => {
-                self.update = UpdateState::Idle;
-                self.say(
-                    false,
-                    format!("peripheral-lite v{} is the newest version", update::CURRENT),
-                );
-            }
+            // no newer release, or no network: nothing to say at start
+            UpdateMsg::Checked(Ok(None) | Err(_)) => {}
             UpdateMsg::Checked(Ok(Some(r))) => {
-                let how = if update::CAN_INSTALL {
-                    "click Update to install it"
-                } else {
-                    "click to open its page"
-                };
-                self.say(false, format!("{} is available: {how}", r.tag));
-                self.update = UpdateState::Available(r);
-            }
-            UpdateMsg::Checked(Err(e)) => {
-                self.update = UpdateState::Idle;
-                self.say(true, format!("Update check failed: {e}"));
+                if r.tag != self.settings.skip {
+                    self.update = UpdateState::Available(r);
+                }
             }
             UpdateMsg::Installed(r, Err(e)) => {
                 self.say(true, format!("Update failed: {e}"));

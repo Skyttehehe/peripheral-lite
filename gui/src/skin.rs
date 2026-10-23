@@ -377,13 +377,14 @@ impl Show {
     }
 }
 
-/// App settings: the chosen skin, the alert level per device and the optional parts shown
-/// (None until decided, see `Show`).
+/// App settings: the chosen skin, the alert level per device, the optional parts shown
+/// (None until decided, see `Show`) and the release tag whose update was skipped.
 #[derive(Default, Clone, PartialEq, Debug)]
 pub struct Settings {
     pub skin: String,
     pub alerts: Vec<(String, u8)>,
     pub show: Option<Show>,
+    pub skip: String,
 }
 
 impl Settings {
@@ -393,6 +394,7 @@ impl Settings {
             let mut f = line.split_whitespace();
             match (f.next(), f.next(), f.next()) {
                 (Some("skin"), Some(id), None) => s.skin = id.to_string(),
+                (Some("skip"), Some(tag), None) => s.skip = tag.to_string(),
                 (Some("alert"), Some(sel), Some(v)) => {
                     if let Ok(v) = v.parse::<u8>() {
                         s.alerts.push((sel.to_string(), v.min(100)));
@@ -417,6 +419,9 @@ impl Settings {
         }
         for (sel, v) in &self.alerts {
             out.push_str(&format!("alert {sel} {v}\n"));
+        }
+        if !self.skip.is_empty() {
+            out.push_str(&format!("skip {}\n", self.skip));
         }
         if let Some(mut show) = self.show {
             for (name, on) in show.parts() {
@@ -480,6 +485,7 @@ mod tests {
         let p = std::env::temp_dir().join(format!("peripheral-lite-app-{}.txt", std::process::id()));
         st.save(&p).unwrap();
         assert_eq!(Settings::load(&p), st);
+        st.skip = "v0.5.0".into();
         st.show = Some(Show {
             nav: true,
             drain: true,

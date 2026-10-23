@@ -117,7 +117,6 @@ Double-click **`peripheral-lite-gui.exe`**. It opens a small battery widget:
     earlier keeps them on, as those versions always showed them.
   - **Tray** starts the app at login, in the tray, so presets are applied from login on. That
     replaces the command-line `autostart` entry, so only one of them runs.
-  - **Check for updates** (see below).
 
   <p align="center"><img src="docs/screenshots/drawer-mouse.png" width="380" alt="Settings drawer for a mouse: DPI, report rate, mode"> <img src="docs/screenshots/drawer-headset.png" width="380" alt="Settings drawer for a headset: battery curve"></p>
 
@@ -133,9 +132,10 @@ it. With **Tray** on, closing hides the widget to the **tray** (on Linux under W
 minimised instead, as Wayland cannot hide a window) and the tray menu's **Quit** exits; with
 **Tray** off, closing quits the app.
 
-**Check for updates** in the settings drawer asks GitHub for a newer release, only when you click it
-(the app never checks on its own). If there is one, the button becomes **Update to vX.Y.Z**; on
-Windows that downloads the release zip, verifies its SHA-256, replaces `peripheral-lite-gui.exe`,
+**Updates:** at start the app asks GitHub once for a newer release (no further checks while it
+runs). If there is one, a bar under the title offers it: **Update**, **Not now** (ask again at the
+next start) or **Skip version** (don't offer this release again; a later one is offered). On
+Windows **Update** downloads the release zip, verifies its SHA-256, replaces `peripheral-lite-gui.exe`,
 `peripheral-lite.exe` and `peripheral-lite-bg.exe` in the app's folder and restarts the app. On Linux and
 macOS it opens the release page instead. It uses the system's `curl` (built into Windows 10 and
 later). (Updating from lghub-lite v0.4.3 needs one manual download; see the note at the top.)
