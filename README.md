@@ -109,6 +109,12 @@ Double-click **`peripheral-lite-gui.exe`**. It opens a small battery widget:
   recording. Below that, for every device:
   - **Alert at** sets the low-battery level for this device (red line). When a device on
     battery drops to it, the widget pops up and its bar in the tray icon turns red.
+  - **Show** turns optional parts of the widget on or off: **Arrows** (◀ ▶ buttons next to
+    Devices that switch device), **Connection** (USB receiver, receiver slot, Bluetooth or
+    Corsair dongle in the display header), **Details** (voltage or HID++ version, where the
+    percentage comes from and the device selector, as chips under the percentage) and
+    **Drain** (battery drain per hour). They are off on a new install; updating from 0.4.4 or
+    earlier keeps them on, as those versions always showed them.
   - **Tray** starts the app at login, in the tray, so presets are applied from login on. That
     replaces the command-line `autostart` entry, so only one of them runs.
   - **Check for updates** (see below).

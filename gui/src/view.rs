@@ -8,29 +8,48 @@ use eframe::egui::{
     pos2, vec2,
 };
 use eframe::epaint::Shadow;
-use peripheral_lite::device::{MODE_HOST, MODE_ONBOARD};
+use peripheral_lite::device::{MODE_HOST, MODE_ONBOARD, is_bluetooth_pid};
 use peripheral_lite::watch::Cmd;
 
 use crate::fonts::{GROTESK, MONO, MONO_SEMIBOLD, PIXEL, SANS, SANS_MEDIUM, SANS_SEMIBOLD, font};
 use crate::history::{self, BARS};
-use crate::skin::{self, BAD, Digits, FACE, FIELDS, FRAME, HI, INK, LCD, LCD_DIM, LCD_INK, LO, OK, Skin};
+use crate::skin::{self, BAD, Digits, FACE, FIELDS, FRAME, HI, INK, LCD, LCD_DIM, LCD_INK, LO, OK, Show, Skin};
 use crate::{App, UpdateState, os, update};
 
 pub const WIDGET_W: f32 = 420.0;
 const MANAGER_W: f32 = 420.0;
 const BOARD_GAP: f32 = 12.0;
-/// The settings drawer: the device's settings, then a row of app settings.
-const DRAWER_H: f32 = 156.0;
+/// The settings drawer: the device's settings, then a row of optional parts and a row of app
+/// settings.
+const DRAWER_H: f32 = DEVICE_SETTINGS_H + 2.0 * DRAWER_ROW_H;
 const DEVICE_SETTINGS_H: f32 = 118.0;
-
-// Vertical layout, y from the widget's top: display, history strip, drawer (when open), devices.
-const DISPLAY_Y: f32 = 41.0;
-const DISPLAY_H: f32 = 100.0;
-const HISTORY_Y: f32 = DISPLAY_Y + DISPLAY_H + 8.0;
-const DRAWER_Y: f32 = HISTORY_Y + 44.0;
-const DEVICES_Y: f32 = DRAWER_Y + 8.0;
+const DRAWER_ROW_H: f32 = 38.0;
 /// How far the open drawer pushes the device list down.
 const DRAWER_SHIFT: f32 = DRAWER_H + 8.0;
+const DISPLAY_Y: f32 = 41.0;
+
+/// Vertical layout, y from the widget's top: display, history strip, drawer (when open), devices.
+struct Layout {
+    display_h: f32,
+    history_y: f32,
+    drawer_y: f32,
+    devices_y: f32,
+}
+
+impl Layout {
+    fn new(show: Show) -> Layout {
+        // the details chips need a row under the percentage
+        let display_h = if show.details { 127.0 } else { 100.0 };
+        let history_y = DISPLAY_Y + display_h + 8.0;
+        let drawer_y = history_y + 44.0;
+        Layout {
+            display_h,
+            history_y,
+            drawer_y,
+            devices_y: drawer_y + 8.0,
+        }
+    }
+}
 
 // Skin manager colours (fixed, not skinned).
 const M_BG: Color32 = Color32::from_rgb(0x0d, 0x0e, 0x10);
@@ -178,6 +197,22 @@ fn click(ui: &mut Ui, rect: Rect, salt: impl std::hash::Hash + std::fmt::Debug, 
     if tip.is_empty() { r } else { r.on_hover_text(tip) }
 }
 
+#[derive(Clone, Copy)]
+enum Dir {
+    Left,
+    Right,
+}
+
+/// A small filled triangle like the design's ◀ ▶ glyphs.
+fn triangle(p: &Painter, c: Pos2, w: f32, h: f32, dir: Dir, color: Color32) {
+    let (w, h) = (w / 2.0, h / 2.0);
+    let pts = match dir {
+        Dir::Left => vec![c + vec2(-w, 0.0), c + vec2(w, -h), c + vec2(w, h)],
+        Dir::Right => vec![c + vec2(w, 0.0), c + vec2(-w, h), c + vec2(-w, -h)],
+    };
+    p.add(Shape::convex_polygon(pts, color, Stroke::NONE));
+}
+
 /// An outlined chip (rate options, drawer actions), optionally filled.
 #[allow(clippy::too_many_arguments)]
 fn chip_at(
@@ -243,11 +278,14 @@ fn glow_text(p: &Painter, pos: Pos2, align: Align2, s: &str, family: &str, size:
 /// What the display shows for the selected device.
 struct Cur {
     name: String,
+    conn: String,
     pct: Option<u8>,
     alert: u8,
     color: Color32,
     time_left: String,
+    drain: String,
     status: String,
+    chips: Vec<String>,
     bars: [Option<u8>; BARS],
 }
 
@@ -260,16 +298,19 @@ impl App {
         let Some(r) = row else {
             return Cur {
                 name: "peripheral-lite".into(),
+                conn: String::new(),
                 pct: None,
                 alert: 20,
                 color: k.c(LCD_DIM),
                 time_left: String::new(),
+                drain: String::new(),
                 status: if self.fatal.is_some() {
                     "Device access failed"
                 } else {
                     "Looking for devices…"
                 }
                 .into(),
+                chips: Vec::new(),
                 bars: [None; BARS],
             };
         };
@@ -279,7 +320,38 @@ impl App {
         let pct = r.percent.filter(|_| r.online);
         let charging = r.charging();
         let drain = r.history.drain_tenths(now).filter(|_| !charging);
+        let corsair = peripheral_lite::corsair::parse_selector(&r.sel).is_some();
+        let conn = match r.sel.split_once(':') {
+            _ if corsair => "Corsair wireless dongle".into(),
+            Some((_, slot)) => format!("Receiver · slot {slot}"),
+            None if u16::from_str_radix(&r.sel, 16).is_ok_and(is_bluetooth_pid) => "Bluetooth".into(),
+            None => "USB receiver".into(),
+        };
         let voltage = snap.and_then(|s| s.voltage_mv);
+        let mut chips = Vec::new();
+        if let Some(mv) = voltage {
+            chips.push(format!("{mv} mV"));
+        } else if let Some((a, b)) = r.protocol {
+            chips.push(format!("HID++ {a}.{b}"));
+        } else if corsair {
+            chips.push("Corsair · experimental".into());
+        }
+        if let Some(s) = snap.filter(|s| s.curve_label.is_some()) {
+            let label = s.curve_label.as_deref().unwrap_or("");
+            chips.push(
+                if s.needs_curve {
+                    "Estimated from voltage"
+                } else if label.starts_with("your") {
+                    "Measured curve"
+                } else if label.starts_with("built-in") {
+                    "Built-in curve"
+                } else {
+                    "G HUB curve"
+                }
+                .into(),
+            );
+        }
+        chips.push(r.sel.clone());
         let status = if !r.online {
             "Offline".to_string()
         } else if let Some(b) = r.battery.as_deref() {
@@ -304,17 +376,25 @@ impl App {
         } else {
             "— h left".into()
         };
-        let (time_left, status) = match r.demo {
-            Some([t, s]) => (t.to_string(), s.to_string()),
-            None => (time_left, status),
+        let drain = match drain {
+            Some(d) => format!("−{}.{}% / h", d / 10, d % 10),
+            None if r.online && !charging => "measuring drain".into(),
+            None => String::new(),
+        };
+        let (time_left, drain, status) = match r.demo {
+            Some([t, d, s]) => (t.to_string(), d.to_string(), s.to_string()),
+            None => (time_left, drain, status),
         };
         Cur {
             name: r.name.clone(),
+            conn,
             pct,
             alert,
             color: pct.map_or(k.c(LCD_DIM), |p| k.level(p, alert)),
             time_left,
+            drain,
             status,
+            chips,
             bars: r.history.bars(now),
         }
     }
@@ -328,11 +408,12 @@ impl App {
             .animate_bool_with_time(ui.scope_id().with("drawer"), self.drawer, 0.28);
         let rows = self.rows.len().max(1) as f32;
         let list_h = 6.0 + 32.0 * rows;
-        let h = DEVICES_Y + 24.0 + DRAWER_SHIFT * t + list_h + 11.0;
+        let l = Layout::new(self.show());
+        let h = l.devices_y + 24.0 + DRAWER_SHIFT * t + list_h + 11.0;
         let mut size = vec2(WIDGET_W, h);
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let o = ui.max_rect().min;
-            self.widget(ui, o, &k, t, h, list_h);
+            self.widget(ui, o, &k, &l, t, h, list_h);
             if self.show_skins {
                 // the manager sits on the design's page background, in its own rounded panel
                 let panel = Rect::from_min_size(
@@ -356,7 +437,7 @@ impl App {
     // ------------------------------------------------------------------ the widget
 
     #[allow(clippy::too_many_arguments)]
-    fn widget(&mut self, ui: &mut Ui, o: Pos2, k: &Skin, t: f32, h: f32, list_h: f32) {
+    fn widget(&mut self, ui: &mut Ui, o: Pos2, k: &Skin, l: &Layout, t: f32, h: f32, list_h: f32) {
         let cur = self.current(k);
         let at = |x: f32, y: f32| o + vec2(x, y);
         let r = |x: f32, y: f32, w: f32, hh: f32| Rect::from_min_size(o + vec2(x, y), vec2(w, hh));
@@ -431,12 +512,12 @@ impl App {
             }
         }
 
-        self.display(ui, &p, o, k, &cur);
-        history_strip(ui, &p, o, k, &cur);
-        self.drawer(ui, o, k, t);
+        self.display(ui, &p, o, k, l, &cur);
+        history_strip(ui, &p, o + vec2(0.0, l.history_y), k, &cur);
+        self.drawer(ui, o + vec2(0.0, l.drawer_y), k, t);
 
         // devices
-        let top = DEVICES_Y + DRAWER_SHIFT * t;
+        let top = l.devices_y + DRAWER_SHIFT * t;
         spaced(
             &p,
             at(15.0, top + 9.0),
@@ -447,7 +528,15 @@ impl App {
             alpha(k.c(INK), 179),
             0.84,
         );
-        p.line_segment([at(73.0, top + 9.5), at(405.0, top + 9.5)], Stroke::new(1.0, k.c(LO)));
+        let nav = self.show().nav;
+        let line_end = if nav { 349.0 } else { 405.0 };
+        p.line_segment(
+            [at(73.0, top + 9.5), at(line_end, top + 9.5)],
+            Stroke::new(1.0, k.c(LO)),
+        );
+        if nav {
+            self.nav_buttons(ui, &p, at(357.0, top + 0.5), k);
+        }
         let list = r(11.0, top + 24.0, 398.0, list_h);
         self.device_list(ui, &p, list, k);
 
@@ -473,6 +562,36 @@ impl App {
                 c,
             );
             click(ui, bar, "message", &msg);
+        }
+    }
+
+    /// ◀ ▶ (optional): previous / next device, from `min` (top left).
+    fn nav_buttons(&mut self, ui: &mut Ui, p: &Painter, min: Pos2, k: &Skin) {
+        let n = self.rows.len();
+        let idx = self
+            .selected
+            .as_ref()
+            .and_then(|s| self.rows.iter().position(|r| &r.sel == s));
+        for (x, dir, tip, step) in [
+            (0.0, Dir::Left, "Previous device", n.saturating_sub(1)),
+            (28.0, Dir::Right, "Next device", 1),
+        ] {
+            let rect = Rect::from_min_size(min + vec2(x, 0.0), vec2(24.0, 18.0));
+            let resp = click(ui, rect, ("nav", x as i32), tip);
+            raised(
+                p,
+                rect,
+                6.0,
+                k.c(FACE),
+                k,
+                true,
+                if resp.hovered() { 1.15 } else { 1.0 },
+            );
+            triangle(p, rect.center() + vec2(0.0, 0.5), 6.0, 6.0, dir, k.c(INK));
+            if resp.clicked() && n > 0 {
+                let i = idx.map_or(0, |i| (i + step) % n);
+                self.select(self.rows[i].sel.clone());
+            }
         }
     }
 
@@ -509,22 +628,33 @@ impl App {
         }
     }
 
-    fn display(&mut self, ui: &mut Ui, p: &Painter, o: Pos2, k: &Skin, cur: &Cur) {
+    fn display(&mut self, ui: &mut Ui, p: &Painter, o: Pos2, k: &Skin, l: &Layout, cur: &Cur) {
         let at = |x: f32, y: f32| o + vec2(x, y);
+        let show = self.show();
         lcd_box(
             p,
-            Rect::from_min_size(at(11.0, DISPLAY_Y), vec2(398.0, DISPLAY_H)),
+            Rect::from_min_size(at(11.0, DISPLAY_Y), vec2(398.0, l.display_h)),
             10.0,
             k,
             true,
         );
-        // header
+        // header: name, and the connection right-aligned (optional)
+        let conn = if show.conn {
+            cur.conn.to_uppercase()
+        } else {
+            String::new()
+        };
+        let conn_w = if conn.is_empty() {
+            0.0
+        } else {
+            text_w(ui, &conn, MONO, 10.5) + 0.63 * conn.chars().count() as f32 + 8.0
+        };
         let name = elide(
             ui,
             &cur.name.to_uppercase(),
             MONO,
             10.5,
-            370.0 - 0.63 * cur.name.len() as f32,
+            370.0 - conn_w - 0.63 * cur.name.len() as f32,
         );
         spaced(
             p,
@@ -536,6 +666,18 @@ impl App {
             k.c(LCD_INK),
             0.63,
         );
+        if !conn.is_empty() {
+            spaced(
+                p,
+                at(395.0, 60.0),
+                Align2::RIGHT_CENTER,
+                &conn,
+                MONO,
+                10.5,
+                k.c(LCD_DIM),
+                0.63,
+            );
+        }
         gauge(p, Rect::from_min_max(at(25.0, 74.0), at(39.0, 128.0)), k, cur);
         // the percentage, right of the gauge: its 54 px line box ends at y 129
         let label = cur.pct.map_or_else(|| "--".to_string(), |v| format!("{v}%"));
@@ -571,9 +713,39 @@ impl App {
                 true,
             ),
         }
-        // detail lines, right-aligned, centred on the digits
-        for (y, s, c) in [(93.0, &cur.time_left, k.c(LCD_INK)), (110.0, &cur.status, k.c(LCD_DIM))] {
+        // detail lines, right-aligned, centred on the digits; the drain line is optional
+        let mut lines = vec![(&cur.time_left, k.c(LCD_INK))];
+        if show.drain {
+            lines.push((&cur.drain, k.c(LCD_DIM)));
+        }
+        lines.push((&cur.status, k.c(LCD_DIM)));
+        let n = lines.len() as f32;
+        for (i, (s, c)) in lines.into_iter().enumerate() {
+            let y = 101.5 + (i as f32 - (n - 1.0) / 2.0) * 17.0;
             text(p, at(395.0, y), Align2::RIGHT_CENTER, s, MONO, 11.5, c);
+        }
+        // details chips under the percentage (optional)
+        if !show.details {
+            return;
+        }
+        let mut x = 25.0;
+        for c in &cur.chips {
+            let w = text_w(ui, c, MONO, 10.0) + 14.0;
+            if x + w > 395.0 {
+                break;
+            }
+            let rect = Rect::from_min_size(at(x, 137.0), vec2(w, 19.0));
+            p.rect_stroke(rect, 4.0, Stroke::new(1.0, k.c(LCD_DIM)), StrokeKind::Inside);
+            text(
+                p,
+                rect.center() + vec2(0.0, -0.5),
+                Align2::CENTER_CENTER,
+                c,
+                MONO,
+                10.0,
+                k.c(LCD_INK),
+            );
+            x += w + 4.0;
         }
     }
 
@@ -581,15 +753,63 @@ impl App {
         if t <= 0.0 {
             return;
         }
-        let top = o.y + DRAWER_Y + 8.0 * t;
+        let top = o.y + 8.0 * t;
         let full = Rect::from_min_size(pos2(o.x + 11.0, top), vec2(398.0, DRAWER_H));
         let visible = Rect::from_min_size(full.min, vec2(398.0, DRAWER_H * t));
         let mut c = ui.new_child(UiBuilder::new().max_rect(full));
         c.set_clip_rect(visible.intersect(ui.clip_rect()));
         lcd_box(c.painter(), full, 10.0, k, false);
-        let (device, app) = full.split_top_bottom_at_y(top + DEVICE_SETTINGS_H);
+        let (device, rest) = full.split_top_bottom_at_y(top + DEVICE_SETTINGS_H);
+        let (show, app) = rest.split_top_bottom_at_y(rest.top() + DRAWER_ROW_H);
         self.drawer_content(&mut c, device, k);
+        self.show_settings(&mut c, show, k);
         self.app_settings(&mut c, app, k);
+    }
+
+    /// The drawer's row of optional widget parts, each a chip that toggles it.
+    fn show_settings(&mut self, ui: &mut Ui, d: Rect, k: &Skin) {
+        let p = ui.painter().clone();
+        p.line_segment(
+            [pos2(d.left() + 12.0, d.top()), pos2(d.right() - 12.0, d.top())],
+            Stroke::new(1.0, k.c(LO)),
+        );
+        text(
+            &p,
+            pos2(d.left() + 12.0, d.center().y),
+            Align2::LEFT_CENTER,
+            "Show",
+            SANS,
+            11.5,
+            k.c(LCD_DIM),
+        );
+        let mut show = self.show();
+        let mut x = d.left() + 61.0;
+        let mut changed = false;
+        for (label, on, tip) in [
+            ("Arrows", &mut show.nav, "Previous / next device buttons beside Devices"),
+            ("Connection", &mut show.conn, "The connection in the display header"),
+            (
+                "Details",
+                &mut show.details,
+                "Voltage or HID++ version, curve source and selector under the percentage",
+            ),
+            ("Drain", &mut show.drain, "Battery drain per hour in the display"),
+        ] {
+            let w = text_w(ui, label, SANS, 11.0) + 18.0;
+            let rect = Rect::from_min_size(pos2(x, d.center().y - 11.0), vec2(w, 22.0));
+            if chip_at(ui, rect, label, SANS, 11.0, k, *on, "show")
+                .on_hover_text(tip)
+                .clicked()
+            {
+                *on = !*on;
+                changed = true;
+            }
+            x += w + 4.0;
+        }
+        if changed {
+            self.settings.show = Some(show);
+            self.save_settings();
+        }
     }
 
     /// The drawer's bottom row: the selected device's alert level, Tray (start at login, in
@@ -1409,8 +1629,9 @@ fn gauge(p: &Painter, rect: Rect, k: &Skin, cur: &Cur) {
     p.rect_filled(line, 1.0, k.c(BAD));
 }
 
+/// The history strip, its top at `o.y`.
 fn history_strip(ui: &mut Ui, p: &Painter, o: Pos2, k: &Skin, cur: &Cur) {
-    let rect = Rect::from_min_size(o + vec2(11.0, HISTORY_Y), vec2(398.0, 44.0));
+    let rect = Rect::from_min_size(o + vec2(11.0, 0.0), vec2(398.0, 44.0));
     lcd_box(p, rect, 8.0, k, true);
     let inner = Rect::from_min_max(rect.min + vec2(6.0, 5.0), rect.max - vec2(6.0, 5.0));
     let gap = 2.0;

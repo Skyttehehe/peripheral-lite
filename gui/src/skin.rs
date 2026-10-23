@@ -345,11 +345,45 @@ pub fn save(dir: &Path, skin: &Skin) -> Result<(), String> {
     write_atomic(&dir.join(format!("{}.json", skin.id)), &skin.to_json())
 }
 
-/// App settings: the chosen skin and the alert level per device.
+/// Optional parts of the widget. Versions up to 0.4.4 always showed them; an update keeps them
+/// on, a new install starts without them.
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+pub struct Show {
+    /// ◀ ▶ buttons that switch device.
+    pub nav: bool,
+    /// The connection ("USB receiver", "Receiver · slot 1", …) in the display header.
+    pub conn: bool,
+    /// Chips under the percentage: voltage or HID++ version, curve source, selector.
+    pub details: bool,
+    /// The drain-rate line in the display.
+    pub drain: bool,
+}
+
+impl Show {
+    pub const ALL: Show = Show {
+        nav: true,
+        conn: true,
+        details: true,
+        drain: true,
+    };
+
+    fn parts(&mut self) -> [(&'static str, &mut bool); 4] {
+        [
+            ("nav", &mut self.nav),
+            ("conn", &mut self.conn),
+            ("details", &mut self.details),
+            ("drain", &mut self.drain),
+        ]
+    }
+}
+
+/// App settings: the chosen skin, the alert level per device and the optional parts shown
+/// (None until decided, see `Show`).
 #[derive(Default, Clone, PartialEq, Debug)]
 pub struct Settings {
     pub skin: String,
     pub alerts: Vec<(String, u8)>,
+    pub show: Option<Show>,
 }
 
 impl Settings {
@@ -362,6 +396,12 @@ impl Settings {
                 (Some("alert"), Some(sel), Some(v)) => {
                     if let Ok(v) = v.parse::<u8>() {
                         s.alerts.push((sel.to_string(), v.min(100)));
+                    }
+                }
+                (Some("show"), Some(part), Some(v @ ("on" | "off"))) => {
+                    let show = s.show.get_or_insert_default();
+                    if let Some((_, b)) = show.parts().into_iter().find(|(n, _)| *n == part) {
+                        *b = v == "on";
                     }
                 }
                 _ => {}
@@ -377,6 +417,11 @@ impl Settings {
         }
         for (sel, v) in &self.alerts {
             out.push_str(&format!("alert {sel} {v}\n"));
+        }
+        if let Some(mut show) = self.show {
+            for (name, on) in show.parts() {
+                out.push_str(&format!("show {name} {}\n", if *on { "on" } else { "off" }));
+            }
         }
         write_atomic(path, &out)
     }
@@ -433,6 +478,13 @@ mod tests {
         st.set_alert("c54d:1", 20);
         st.set_alert("c54d:1", 25);
         let p = std::env::temp_dir().join(format!("peripheral-lite-app-{}.txt", std::process::id()));
+        st.save(&p).unwrap();
+        assert_eq!(Settings::load(&p), st);
+        st.show = Some(Show {
+            nav: true,
+            drain: true,
+            ..Default::default()
+        });
         st.save(&p).unwrap();
         assert_eq!(Settings::load(&p), st);
         std::fs::remove_file(&p).unwrap();
