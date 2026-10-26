@@ -618,8 +618,9 @@ impl App {
             if let Some(t) = &self.tray {
                 t.set_levels(state.1, state.2);
             }
-            // winit only updates the small icon at run time; the taskbar shows the big one
-            if self.hwnd != 0 {
+            // winit only updates the small icon at run time (the taskbar shows the big one), and
+            // none on macOS (the Dock shows the application's icon): set them ourselves
+            if self.hwnd != 0 || cfg!(target_os = "macos") {
                 os::set_window_icons(
                     self.hwnd as _,
                     &icons::app(small, lowest),
