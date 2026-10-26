@@ -96,8 +96,9 @@ Double-click **`peripheral-lite-gui.exe`**. It opens a small battery widget:
 
 - **The display** shows the selected device: battery percentage, time left and charging
   state. The segment gauge left of the percentage and the **history** strip below show the
-  level; the history has one bar per hour for the last 24 hours. Time left appears after about
-  an hour of readings.
+  level; the history has one bar per hour for the last 24 hours. Time left appears once the
+  app has seen the level drop twice, at least an hour apart: after about an hour for a headset,
+  but days for devices that report in 5 % steps and last weeks (MX Master 3S, MX Keys S).
 - A click in the **Devices** list switches device.
 - The **settings** button (the sliders icon in the title bar) opens the settings drawer. For a
   mouse: **DPI** (type a value, **Apply**), **report rate** and **mode**. "Onboard profile"
