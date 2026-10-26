@@ -2336,7 +2336,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "peripheral-lite"
-version = "0.4.4"
+version = "0.5.0"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -2344,7 +2344,7 @@ dependencies = [
 
 [[package]]
 name = "peripheral-lite-gui"
-version = "0.4.4"
+version = "0.5.0"
 dependencies = [
  "eframe",
  "ksni",
