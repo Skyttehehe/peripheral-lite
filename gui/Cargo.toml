@@ -1,6 +1,6 @@
 [package]
 name = "peripheral-lite-gui"
-version = "0.4.4"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.95" # eframe 0.37
 description = "Window + tray front end for peripheral-lite. Not affiliated with or endorsed by Logitech."

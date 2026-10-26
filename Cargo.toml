@@ -3,7 +3,7 @@
 
 [package]
 name = "peripheral-lite"
-version = "0.4.4"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Tiny CLI for Logitech HID++ mice and headsets: DPI, report rate, battery, presets. Not affiliated with or endorsed by Logitech."
