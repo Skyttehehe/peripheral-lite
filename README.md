@@ -78,8 +78,8 @@ your user may open the devices without root.
 
 **macOS**: download `peripheral-lite-<version>-macos-arm64.tar.gz`, unpack it and follow its
 `INSTALL-macos.md`. The one required step is clearing the download quarantine
-(`xattr -dr com.apple.quarantine <folder>`), since the files are not notarised. No
-permission prompt or driver is needed.
+(`xattr -dr com.apple.quarantine <folder>`), since the files are not notarised. The app then
+asks for Input Monitoring (needed to open a mouse or keyboard); no driver is needed.
 
 The executables are not code-signed, so Windows SmartScreen may warn the first time; choose
 "More info" → "Run anyway", or build from source (below).

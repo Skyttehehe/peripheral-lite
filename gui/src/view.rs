@@ -312,6 +312,8 @@ impl App {
                 drain: String::new(),
                 status: if self.fatal.is_some() {
                     "Device access failed"
+                } else if self.no_access {
+                    "No access to devices"
                 } else {
                     "Looking for devices…"
                 }
@@ -412,7 +414,12 @@ impl App {
         let t = ui
             .ctx()
             .animate_bool_with_time(ui.scope_id().with("drawer"), self.drawer, 0.28);
-        let rows = self.rows.len().max(1) as f32;
+        // no devices for lack of access: room for the explanation and its button
+        let rows = if self.rows.is_empty() && self.no_access {
+            3.0
+        } else {
+            self.rows.len().max(1) as f32
+        };
         let list_h = 6.0 + 32.0 * rows;
         let bar = !matches!(self.update, UpdateState::Idle);
         let l = Layout::new(self.show(), bar);
@@ -1204,9 +1211,39 @@ impl App {
         }
     }
 
+    /// The device list when the OS will not let us open any device: why, and (macOS) a button
+    /// to the settings page that allows it. The watcher tries again every 30 s, so the devices
+    /// appear once access is allowed.
+    fn no_access_help(&mut self, ui: &mut Ui, p: &Painter, list: Rect, k: &Skin) {
+        let has_button = os::ACCESS_SETTINGS.is_some();
+        let top = list.center().y - if has_button { 26.0 } else { 10.0 };
+        for (i, (line, c)) in [(os::NO_ACCESS[0], k.c(LCD_INK)), (os::NO_ACCESS[1], k.c(LCD_DIM))]
+            .into_iter()
+            .enumerate()
+        {
+            let pos = pos2(list.center().x, top + i as f32 * 19.0);
+            text(p, pos, Align2::CENTER_CENTER, line, SANS, 12.5, c);
+        }
+        if let Some(url) = os::ACCESS_SETTINGS {
+            let label = "Open Input Monitoring";
+            let w = text_w(ui, label, SANS, 11.5) + 20.0;
+            let rect = Rect::from_center_size(pos2(list.center().x, top + 50.0), vec2(w, 24.0));
+            if chip_at(ui, rect, label, SANS, 11.5, k, false, "access")
+                .on_hover_text("System Settings > Privacy & Security > Input Monitoring")
+                .clicked()
+            {
+                peripheral_lite::platform::open_folder(std::path::Path::new(url));
+            }
+        }
+    }
+
     fn device_list(&mut self, ui: &mut Ui, p: &Painter, list: Rect, k: &Skin) {
         p.rect_filled(list, 9.0, k.c(LCD));
         p.rect_stroke(list, 9.0, Stroke::new(1.0, k.c(LO)), StrokeKind::Inside);
+        if self.rows.is_empty() && self.no_access && self.fatal.is_none() {
+            self.no_access_help(ui, p, list, k);
+            return;
+        }
         if self.rows.is_empty() {
             let msg = if self.fatal.is_some() {
                 "Device access failed"

@@ -7,8 +7,10 @@ receivers, headsets) use the same code as on Windows but have not been tried on 
 [device report](https://github.com/Skyttehehe/peripheral-lite/issues/new?template=device-report.md)
 is very welcome.
 
-No driver, kernel extension or permission prompt is needed: HID++ uses a vendor-defined HID
-collection, which macOS lets a normal user open.
+No driver or kernel extension is needed. Recent macOS versions do ask for **Input
+Monitoring** before a program may open a mouse or keyboard (seen on an MX Master 3S and MX Keys
+S): the app asks for it itself, see step 3; for the command-line tool, allow the terminal you
+run it in.
 
 ## 1. Let macOS run the downloaded files (once)
 
@@ -39,6 +41,13 @@ to a device report: it holds everything needed to find the problem.
 Move `peripheral-lite.app` to `/Applications` and open it. It shows the battery widget and a
 battery item in the menu bar (Open / Skins… / Quit). Closing the widget hides it to the menu
 bar.
+
+The first time, macOS asks whether peripheral-lite may use Input Monitoring; allow it. Without
+it the widget says "macOS blocks access to the devices", with a button to **System Settings >
+Privacy & Security > Input Monitoring**: switch peripheral-lite on there, and the devices
+appear within 30 seconds. Since the app is not signed, macOS treats every new version as a new
+app: after an update, an older peripheral-lite entry there may look on but not apply. Remove
+it with **−**; the app then asks again.
 
 **Tray** in the app, or `peripheral-lite autostart on`, starts it at login through a LaunchAgent,
 `~/Library/LaunchAgents/io.github.peripheral-lite.plist`. Settings, presets, skins and battery

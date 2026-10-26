@@ -120,6 +120,8 @@ struct App {
     /// (is_error, text, when)
     message: Option<(bool, String, Instant)>,
     fatal: Option<String>,
+    /// The OS refused to open a device (macOS: Input Monitoring not allowed).
+    no_access: bool,
     tray: Option<tray::Tray>,
     tray_tip: String,
     /// What the window and tray icons show now: (lowest, first device, second device).
@@ -316,6 +318,7 @@ impl App {
             dpi_input: String::new(),
             message: None,
             fatal: None,
+            no_access: false,
             tray,
             tray_tip: String::new(),
             icon_state: None,
@@ -457,6 +460,7 @@ impl App {
                 battery,
                 battery_percent,
             } => {
+                self.no_access = false; // a device opened: access was allowed
                 refresh = self.selected.as_deref() == Some(sel.as_str());
                 match self.rows.iter_mut().find(|r| r.sel == sel) {
                     Some(r) => {
@@ -516,6 +520,12 @@ impl App {
                 if let Some(s) = self.snap.as_mut().filter(|s| s.sel == sel) {
                     s.headset = Some(settings);
                 }
+            }
+            Update::NoAccess { .. } => {
+                if !self.rows.is_empty() {
+                    self.say(true, os::NO_ACCESS.join(" "));
+                }
+                self.no_access = true;
             }
             Update::Line(_) | Update::Receiver { .. } => {}
         }

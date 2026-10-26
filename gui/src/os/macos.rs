@@ -49,6 +49,15 @@ pub fn set_window_icons(_hwnd: isize, _small: &[u8], _ss: u32, big: &[u8], bs: u
     }
 }
 
+/// What the widget says when the OS will not let us open the devices, and the settings page
+/// that fixes it (System Settings > Privacy & Security > Input Monitoring).
+pub const NO_ACCESS: [&str; 2] = [
+    "macOS blocks access to the devices.",
+    "Allow peripheral-lite under Input Monitoring.",
+];
+pub const ACCESS_SETTINGS: Option<&str> =
+    Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent");
+
 /// Windows-only fix for a winit quirk; nothing to do here.
 pub fn full_client_area(_hwnd: isize) {}
 

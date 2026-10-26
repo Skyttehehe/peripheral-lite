@@ -47,6 +47,9 @@ pub fn report_id_for_len(len: usize) -> Option<u8> {
 #[derive(Debug, PartialEq)]
 pub enum Error {
     Io(String),
+    /// The OS refused to open the device (macOS: Input Monitoring not allowed; Linux: no
+    /// udev rule). Shown like Io.
+    Denied(String),
     Timeout,
     /// HID++ 1.0 error (sub-ID 0x8F), code from byte 5.
     Hpp10(u8),
@@ -61,7 +64,7 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::Io(s) => write!(f, "I/O: {s}"),
+            Error::Io(s) | Error::Denied(s) => write!(f, "I/O: {s}"),
             Error::Timeout => write!(f, "no reply (timeout)"),
             Error::Hpp10(c) => write!(f, "HID++ 1.0 error {c:#04x} ({})", hpp10_error_name(*c)),
             Error::Hpp20(c) => write!(f, "HID++ 2.0 error {c:#04x} ({})", hpp20_error_name(*c)),
@@ -237,7 +240,10 @@ impl Hidpp {
         let (nodes, routes) = plan_routes(infos);
         let mut cols = Vec::new();
         for i in nodes {
-            cols.push(Handle::open(i).map_err(|e| Error::Io(open_hint(&i.path, e)))?);
+            cols.push(Handle::open(i).map_err(|e| match e.kind() {
+                std::io::ErrorKind::PermissionDenied => Error::Denied(open_hint(&i.path, e)),
+                _ => Error::Io(open_hint(&i.path, e)),
+            })?);
         }
         Ok(Hidpp {
             cols,

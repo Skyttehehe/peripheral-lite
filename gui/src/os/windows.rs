@@ -135,6 +135,13 @@ pub fn skin_file_dialog(save: bool, name: &str) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf16_lossy(&buf[..len])))
 }
 
+/// What the widget says when the OS will not let us open the devices.
+pub const NO_ACCESS: [&str; 2] = [
+    "Windows blocks access to the devices.",
+    "Another program may hold them.",
+];
+pub const ACCESS_SETTINGS: Option<&str> = None;
+
 /// Icon sizes Windows uses at the system DPI: (tray / small, window / taskbar).
 pub fn icon_sizes() -> (u32, u32) {
     use windows_sys::Win32::UI::HiDpi::{GetDpiForSystem, GetSystemMetricsForDpi};

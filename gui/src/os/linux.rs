@@ -50,6 +50,10 @@ pub fn skin_file_dialog(save: bool, name: &str) -> Option<PathBuf> {
     None
 }
 
+/// What the widget says when the OS will not let us open the devices.
+pub const NO_ACCESS: [&str; 2] = ["No access to the devices.", "Install the udev rule (see the README)."];
+pub const ACCESS_SETTINGS: Option<&str> = None;
+
 /// (tray, window) icon sizes. The tray gets several sizes (see tray/linux.rs); the window
 /// icon is scaled by the desktop.
 pub fn icon_sizes() -> (u32, u32) {

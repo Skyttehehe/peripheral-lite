@@ -1,7 +1,8 @@
 //! `--demo`: shows sample devices (the design's two, plus a Corsair headset) without touching any hardware, for
 //! screenshots and for comparing the widget with the design. Extra flags open parts of it:
 //! `--demo-select N`, `--demo-drawer`, `--demo-skins`, `--demo-skin ID`, `--demo-all` (every
-//! optional part shown, as for users updating from 0.4.4), `--demo-update` (the update bar).
+//! optional part shown, as for users updating from 0.4.4), `--demo-update` (the update bar),
+//! `--demo-no-access` (no devices: the OS refused access).
 
 use peripheral_lite::corsair::Settings;
 use peripheral_lite::device::{Dpi, DpiCaps, MODE_HOST};
@@ -19,6 +20,7 @@ pub struct Options {
     skin: Option<String>,
     all: bool,
     update: bool,
+    no_access: bool,
 }
 
 impl Options {
@@ -43,6 +45,7 @@ impl Options {
             skin: value("--demo-skin"),
             all: args.iter().any(|a| a == "--demo-all"),
             update: args.iter().any(|a| a == "--demo-update"),
+            no_access: args.iter().any(|a| a == "--demo-no-access"),
         })
     }
 
@@ -162,6 +165,12 @@ impl Options {
         app.drawer = self.drawer;
         app.show_skins = self.skins;
         app.settings.show = Some(if self.all { Show::ALL } else { Show::default() });
+        if self.no_access {
+            app.rows.clear();
+            app.selected = None;
+            app.no_access = true;
+            return;
+        }
         if self.update {
             app.update = UpdateState::Available(Release { tag: "v0.5.0".into() });
         }

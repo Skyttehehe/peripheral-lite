@@ -113,12 +113,20 @@ pub enum Update {
         sel: String,
         settings: crate::corsair::Settings,
     },
+    /// The OS does not let us open this interface (macOS: Input Monitoring; Linux: the udev
+    /// rule). Reported once; it is tried again every QUICK_POLL until it opens.
+    NoAccess {
+        pid: u16,
+        product: String,
+        reason: String,
+    },
 }
 
 impl fmt::Display for Update {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Update::Line(s) => f.write_str(s),
+            Update::NoAccess { pid, product, reason } => write!(f, "! {pid:04x}  {product}  cannot open: {reason}"),
             Update::Receiver { pid, product } => write!(f, "+ {pid:04x}  {product}  (receiver)"),
             Update::Added {
                 sel,
@@ -519,6 +527,8 @@ impl Polled {
 pub struct Monitor {
     notifier: Notifier,
     live: Vec<Live>,
+    /// Interfaces the OS would not let us open (keys), already reported as NoAccess.
+    denied: Vec<String>,
     polled: Vec<Polled>,
     swid: u8,
     trace: bool,
@@ -536,6 +546,7 @@ impl Monitor {
         let mut m = Monitor {
             notifier,
             live: Vec::new(),
+            denied: Vec::new(),
             polled: Vec::new(),
             swid,
             trace,
@@ -593,7 +604,8 @@ impl Monitor {
             Woken,
             Poll,
         }
-        let percent = self.live.iter().any(|l| l.devs.iter().any(|d| d.has_percent));
+        // timer reads of percentage batteries, and retries of interfaces we may not open yet
+        let percent = !self.denied.is_empty() || self.live.iter().any(|l| l.devs.iter().any(|d| d.has_percent));
         let polling =
             percent || !self.polled.is_empty() || self.live.iter().any(|l| l.devs.iter().any(|d| d.has_voltage));
         let due = if percent || self.polled.iter().any(Polled::quick) {
@@ -665,6 +677,10 @@ impl Monitor {
                     for l in self.live.iter_mut() {
                         poll_percent(l, &mut out);
                     }
+                    if !self.denied.is_empty() {
+                        // access may have been allowed since: no event says so
+                        self.sync(&mut out)?;
+                    }
                 }
                 if now >= self.next_poll {
                     self.next_poll = now + BATTERY_POLL;
@@ -711,12 +727,26 @@ impl Monitor {
                     describe(&mut l, out);
                     self.live.push(l);
                 }
+                Err(e @ Error::Denied(_)) => {
+                    if !self.denied.contains(&key) {
+                        self.denied.push(key);
+                        out.push(Update::NoAccess {
+                            pid: f.pid,
+                            product: f.product.clone(),
+                            reason: e.to_string(),
+                        });
+                    }
+                }
                 Err(e) => out.push(Update::Line(format!(
                     "! {:04x}  {}  cannot open: {e}",
                     f.pid, f.product
                 ))),
             }
         }
+        // forget denials of interfaces that opened since or are gone
+        let live = &self.live;
+        self.denied
+            .retain(|k| ifs.iter().any(|f| &f.cols[0].iface == k) && !live.iter().any(|l| &l.key == k));
 
         // Polled headsets: Centurion (no HID++ interface of the same PID) and Corsair
         let found: Vec<(u16, String, hid::Info, Protocol)> = centurion::interfaces()

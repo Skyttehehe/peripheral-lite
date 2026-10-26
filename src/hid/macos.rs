@@ -104,6 +104,21 @@ unsafe extern "C" {
     fn IORegistryEntryIDMatching(id: u64) -> *mut c_void;
     fn IOServiceGetMatchingService(main_port: u32, matching: *mut c_void) -> IoObject;
     fn IOObjectRelease(o: IoObject) -> i32;
+    fn IOHIDRequestAccess(request: u32) -> bool;
+}
+
+/// kIOHIDRequestTypeListenEvent: Input Monitoring.
+const LISTEN_EVENT: u32 = 1;
+
+/// Ask macOS for Input Monitoring: it lists the app (or the terminal) under System Settings >
+/// Privacy & Security > Input Monitoring and shows its prompt while nothing is decided (first
+/// use, or after the entry was removed); a decided request asks nothing. Opening succeeds once
+/// the user allows it, without a restart (the watcher tries again every 30 s).
+fn request_input_monitoring() {
+    // SAFETY: a plain call without pointers; it returns at once, the prompt is macOS's own.
+    unsafe {
+        IOHIDRequestAccess(LISTEN_EVENT);
+    }
 }
 
 /// A CF object we own (from a Create/Copy call), released on drop.
@@ -436,6 +451,9 @@ impl Handle {
             let r = IOHIDDeviceOpen(dev, 0);
             if r != 0 {
                 CFRelease(dev);
+                if r == NOT_PERMITTED {
+                    request_input_monitoring();
+                }
                 return Err(open_error(r));
             }
             SendPtr(dev)
