@@ -1,13 +1,53 @@
 //! macOS helpers: reaching an already running instance (the shared Unix socket), file dialogs
-//! through AppleScript, icon sizes. Window and Dock icons come from winit/eframe.
+//! through AppleScript, the Dock icon, icon sizes.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 pub use super::unix::{focus_existing, serve_show_requests};
 
-/// The Dock icon is set through eframe (`ViewportCommand::Icon`); nothing extra to do.
-pub fn set_window_icons(_hwnd: isize, _small: &[u8], _ss: u32, _big: &[u8], _bs: u32) {}
+/// Show `big` (RGBA, `bs`×`bs`, not premultiplied) as the Dock icon. winit ignores window icons
+/// on macOS and eframe sets the application icon only at start, so this goes to AppKit
+/// directly. Main thread only (it is called from the frame); elsewhere it does nothing.
+pub fn set_window_icons(_hwnd: isize, _small: &[u8], _ss: u32, big: &[u8], bs: u32) {
+    use objc2::{AnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSBitmapFormat, NSBitmapImageRep, NSDeviceRGBColorSpace, NSImage};
+    use objc2_foundation::NSSize;
+
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    if big.len() != (bs * bs * 4) as usize {
+        return;
+    }
+    let side = bs as isize;
+    // SAFETY: with null planes the image rep allocates and owns its pixel buffer, of exactly
+    // side × side × 4 bytes as described; `big` has that length and is copied into it.
+    unsafe {
+        let Some(rep) = NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bitmapFormat_bytesPerRow_bitsPerPixel(
+            NSBitmapImageRep::alloc(),
+            std::ptr::null_mut(),
+            side,
+            side,
+            8,
+            4,
+            true,
+            false,
+            NSDeviceRGBColorSpace,
+            NSBitmapFormat::AlphaNonpremultiplied,
+            side * 4,
+            32,
+        ) else {
+            return;
+        };
+        let data = rep.bitmapData();
+        if data.is_null() {
+            return;
+        }
+        std::ptr::copy_nonoverlapping(big.as_ptr(), data, big.len());
+        let image = NSImage::initWithSize(NSImage::alloc(), NSSize::new(bs as f64, bs as f64));
+        image.addRepresentation(&rep);
+        NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image));
+    }
+}
 
 /// Windows-only fix for a winit quirk; nothing to do here.
 pub fn full_client_area(_hwnd: isize) {}

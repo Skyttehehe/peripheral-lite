@@ -2348,6 +2348,9 @@ version = "0.4.4"
 dependencies = [
  "eframe",
  "ksni",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "peripheral-lite",
  "raw-window-handle",
  "tray-icon",

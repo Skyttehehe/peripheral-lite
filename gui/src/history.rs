@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 
 pub const BARS: usize = 24;
 const HOUR: u64 = 3600;
-/// Keep two days in memory; the file is trimmed to that once it grows past 64 KB.
-const KEEP: u64 = 48 * HOUR;
+/// Keep two weeks in memory (a battery that reports in 10 % steps can take days per step);
+/// the file is trimmed to that once it grows past 64 KB.
+const KEEP: u64 = 14 * 24 * HOUR;
 const FILE_MAX: u64 = 64 << 10;
 /// Unchanged readings are still stored this often, so the bars stay filled.
 const REPEAT: u64 = 30 * 60;
@@ -74,22 +75,32 @@ impl History {
         out
     }
 
-    /// Drain in tenths of a percent per hour over the current discharge (at most the last 6 h):
-    /// needs at least an hour of readings and a 1 % drop.
-    pub fn drain_tenths(&self, now: u64) -> Option<u32> {
-        let recent: Vec<&(u64, u8)> = self.samples.iter().filter(|s| s.0 + 6 * HOUR >= now).collect();
-        let mut start = recent.len().checked_sub(1)?;
+    /// Drain in tenths of a percent per hour over the current discharge, from the drops seen
+    /// as they happened (a reading lower than the one before, at most an hour after it): the
+    /// last drop and the earliest within 6 h before it, or if those are less than an hour
+    /// apart, the latest drop at least an hour before it. Timing drops rather than the first
+    /// reading works for batteries that report in 10 % steps (MX Master 3S, MX Keys S): a
+    /// reading of 90 % may be anything up to the next step, but the moment it falls to 80 % is
+    /// exact. Needs two drops an hour or more apart.
+    pub fn drain_tenths(&self) -> Option<u32> {
+        let s = &self.samples;
+        let mut start = s.len().checked_sub(1)?;
         // walk back while the level does not rise (a rise means it was charging)
-        while start > 0 && recent[start - 1].1 >= recent[start].1 {
+        while start > 0 && s[start - 1].1 >= s[start].1 {
             start -= 1;
         }
-        let (first, last) = (recent[start], recent[recent.len() - 1]);
-        let span = last.0.saturating_sub(first.0);
+        let drops: Vec<(u64, u8)> = (start + 1..s.len())
+            .filter(|&i| s[i].1 < s[i - 1].1 && s[i].0 <= s[i - 1].0 + HOUR)
+            .map(|i| s[i])
+            .collect();
+        let last = *drops.last()?;
+        let first = drops
+            .iter()
+            .find(|d| d.0 + 6 * HOUR >= last.0)
+            .filter(|d| d.0 + HOUR <= last.0)
+            .or_else(|| drops.iter().rev().find(|d| d.0 + HOUR <= last.0))?;
         let drop = first.1.saturating_sub(last.1) as u64;
-        if span < HOUR || drop == 0 {
-            return None;
-        }
-        Some((drop * 10 * HOUR / span) as u32)
+        Some((drop * 10 * HOUR / (last.0 - first.0)) as u32)
     }
 }
 
@@ -124,25 +135,37 @@ mod tests {
         assert_eq!(b[BARS - 1], Some(76));
         assert_eq!(b[BARS - 7], Some(88));
         assert_eq!(b[0], None);
-        assert_eq!(h.drain_tenths(now), Some(20));
+        assert_eq!(h.drain_tenths(), Some(20));
         // a charge in between: only the part after it counts
         let h = History::memory(vec![
             (now - 5 * HOUR, 50),
             (now - 3 * HOUR, 90),
+            (now - 2 * HOUR, 88),
             (now - HOUR, 86),
             (now, 84),
         ]);
-        assert_eq!(h.drain_tenths(now), Some(20));
-        // too short or no drop
+        assert_eq!(h.drain_tenths(), Some(20));
+        // too short, no drop, or a drop not seen as it happened (the app was not running)
+        assert_eq!(History::memory(vec![(now - 600, 50), (now, 49)]).drain_tenths(), None);
         assert_eq!(
-            History::memory(vec![(now - 600, 50), (now, 49)]).drain_tenths(now),
+            History::memory(vec![(now - 2 * HOUR, 50), (now, 50)]).drain_tenths(),
             None
         );
         assert_eq!(
-            History::memory(vec![(now - 2 * HOUR, 50), (now, 50)]).drain_tenths(now),
+            History::memory(vec![(now - 9 * HOUR, 60), (now - 8 * HOUR, 59), (now, 50)]).drain_tenths(),
             None
         );
-        assert_eq!(History::memory(vec![]).drain_tenths(now), None);
+        assert_eq!(History::memory(vec![]).drain_tenths(), None);
+        // 10 % steps, a reading every 30 minutes: 90 % until a drop at 10 h, 80 % until 30 h,
+        // so 10 % took 20 h; one drop alone says nothing yet
+        let level = |i: u64| match i {
+            0..20 => 90,
+            20..60 => 80,
+            _ => 70,
+        };
+        let steps = |hours: u64| History::memory((0..=hours * 2).map(|i| (i * HOUR / 2, level(i))).collect());
+        assert_eq!(steps(29).drain_tenths(), None);
+        assert_eq!(steps(31).drain_tenths(), Some(5));
     }
 
     #[test]

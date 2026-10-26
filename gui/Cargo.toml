@@ -27,6 +27,18 @@ ksni = { version = "0.3.6", default-features = false, features = ["blocking", "a
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tray-icon = "0.26" # a menu bar item
+# the Dock icon at run time (already in the build through eframe)
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSBitmapImageRep",
+    "NSGraphics",
+    "NSImage",
+    "NSImageRep",
+    "NSResponder",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
 
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.26"

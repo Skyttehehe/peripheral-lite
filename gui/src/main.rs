@@ -618,8 +618,9 @@ impl App {
             if let Some(t) = &self.tray {
                 t.set_levels(state.1, state.2);
             }
-            // winit only updates the small icon at run time; the taskbar shows the big one
-            if self.hwnd != 0 {
+            // winit only updates the small icon at run time (the taskbar shows the big one), and
+            // none on macOS (the Dock shows the application's icon): set them ourselves
+            if self.hwnd != 0 || cfg!(target_os = "macos") {
                 os::set_window_icons(
                     self.hwnd as _,
                     &icons::app(small, lowest),
@@ -807,6 +808,9 @@ fn worker(
     }
 }
 
+/// How often the app wakes to store unchanged battery levels in the history.
+const HISTORY_TICK: Duration = Duration::from_secs(300);
+
 impl eframe::App for App {
     /// Runs before every frame, and also while the window is hidden whenever a repaint is
     /// requested (worker updates, tray clicks), so the tray works with the window hidden.
@@ -820,6 +824,15 @@ impl eframe::App for App {
         }
         self.poll_update(ctx);
         self.update_tray(ctx);
+        // Store the level of online devices now and then even when it does not change, so a
+        // drop after hours at one level still counts as seen (see `History::drain_tenths`).
+        let now = history::now();
+        for r in self.rows.iter_mut().filter(|r| r.online) {
+            if let Some(p) = r.percent {
+                r.history.add(now, p);
+            }
+        }
+        ctx.request_repaint_after(HISTORY_TICK);
         if self.message.as_ref().is_some_and(|m| m.2.elapsed() > MESSAGE_TIME) {
             self.message = None;
         }
