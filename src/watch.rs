@@ -1,9 +1,12 @@
 //! `watch`: long-running, event-driven monitor. `Monitor::next` blocks in a single wait
 //! (`hid::wait_any`) on every open HID++ collection plus the PnP notification (and
-//! an optional cross-thread `Waker`), so it uses no CPU while nothing happens. The one
-//! exception: headsets that report battery only as a voltage (0x1F20) are read every
-//! BATTERY_POLL, because no unsolicited 0x1F20 event has been seen on hardware (G HUB polls it
-//! too). Battery drains over hours, so a 5-minute read costs nothing measurable.
+//! an optional cross-thread `Waker`), so it uses no CPU while nothing happens. The
+//! exceptions are batteries read on a timer: headsets that report battery only as a voltage
+//! (0x1F20) every BATTERY_POLL, because no unsolicited 0x1F20 event has been seen on hardware
+//! (G HUB polls it too), and percentage batteries (0x1004/0x1000/0x1001) every QUICK_POLL,
+//! because some devices never send their battery event: an MX Master 3S over Bluetooth on
+//! macOS sent none when its charging cable was plugged in. One short read costs nothing
+//! measurable.
 //! Whenever a device attaches (start-up, plug-in, receiver link-up, wake from sleep) its preset
 //! from the preset file is applied; the file is re-read each time, so edits need no restart.
 //!
@@ -204,6 +207,8 @@ struct Dev {
     feats: Vec<(u8, u16)>,
     /// Battery reported only as a voltage (0x1F20); read on a timer.
     has_voltage: bool,
+    /// Battery reported as a percentage (0x1004/0x1000/0x1001); also read on a timer.
+    has_percent: bool,
     model: u16,
     /// Best curve for a voltage-only battery (always set for those).
     curve: Option<Curve>,
@@ -218,8 +223,9 @@ struct Dev {
 }
 
 const BATTERY_POLL: Duration = Duration::from_secs(300);
-/// Poll interval for Corsair headsets, and for any polled headset while it is off: neither
-/// announces being switched off or on, so the battery timer alone would take minutes to notice.
+/// Poll interval for Corsair headsets, for any polled headset while it is off (neither
+/// announces being switched off or on, so the battery timer alone would take minutes to
+/// notice) and for percentage batteries (charging starts and stops show within it).
 const QUICK_POLL: Duration = Duration::from_secs(30);
 
 /// One open HID++ interface (a direct device or a receiver).
@@ -587,8 +593,10 @@ impl Monitor {
             Woken,
             Poll,
         }
-        let polling = !self.polled.is_empty() || self.live.iter().any(|l| l.devs.iter().any(|d| d.has_voltage));
-        let due = if self.polled.iter().any(Polled::quick) {
+        let percent = self.live.iter().any(|l| l.devs.iter().any(|d| d.has_percent));
+        let polling =
+            percent || !self.polled.is_empty() || self.live.iter().any(|l| l.devs.iter().any(|d| d.has_voltage));
+        let due = if percent || self.polled.iter().any(Polled::quick) {
             self.next_poll.min(self.next_quick)
         } else {
             self.next_poll
@@ -652,7 +660,12 @@ impl Monitor {
             Got::Woken => {}
             Got::Poll => {
                 let now = Instant::now();
-                self.next_quick = now + QUICK_POLL;
+                if now >= self.next_quick {
+                    self.next_quick = now + QUICK_POLL;
+                    for l in self.live.iter_mut() {
+                        poll_percent(l, &mut out);
+                    }
+                }
                 if now >= self.next_poll {
                     self.next_poll = now + BATTERY_POLL;
                     for l in self.live.iter_mut() {
@@ -1054,6 +1067,7 @@ fn attach(l: &mut Live, index: u8, out: &mut Vec<Update>) {
         name: name.clone(),
         feats,
         has_voltage,
+        has_percent: false,
         model: 0,
         curve: None,
         low_mv: u16::MAX,
@@ -1097,7 +1111,11 @@ fn attach(l: &mut Live, index: u8, out: &mut Vec<Update>) {
         r
     } else {
         match device::battery(&mut l.h, index) {
-            Ok(b) => (Some(b.to_string()), b.percent()),
+            Ok(b) => {
+                dev.has_percent = b.percent().is_some();
+                dev.last_battery = b.to_string();
+                (Some(b.to_string()), b.percent())
+            }
             Err(_) => (None, None),
         }
     };
@@ -1176,6 +1194,16 @@ fn handle(l: &mut Live, r: &[u8], trace: bool, out: &mut Vec<Update>) {
             l.devs.retain(|d| d.index != index);
         }
         Event::Voltage { mv, flags } => report_voltage(l, r[1], &Adc { mv, flags }, out),
+        Event::Battery(ref b) => {
+            // remembered, so the next timer read does not report it again
+            if let Some(d) = l.devs.iter_mut().find(|d| d.index == r[1]) {
+                d.last_battery = b.to_string();
+            }
+            out.push(Update::Event {
+                sel: l.sel(r[1]),
+                event,
+            });
+        }
         _ => out.push(Update::Event {
             sel: l.sel(r[1]),
             event,
@@ -1264,6 +1292,31 @@ fn poll_battery(l: &mut Live, out: &mut Vec<Update>) {
                     });
                 }
             }
+            Err(e) => crate::verbose(format_args!("battery read failed: {e}")),
+        }
+    }
+}
+
+/// Timer read of percentage batteries: report what changed since the last reading or event.
+fn poll_percent(l: &mut Live, out: &mut Vec<Update>) {
+    let idx: Vec<u8> = l.devs.iter().filter(|d| d.has_percent).map(|d| d.index).collect();
+    for i in idx {
+        match device::battery(&mut l.h, i) {
+            Ok(b) => {
+                let text = b.to_string();
+                let sel = l.sel(i);
+                if let Some(d) = l.devs.iter_mut().find(|d| d.index == i)
+                    && d.last_battery != text
+                {
+                    d.last_battery = text.clone();
+                    out.push(Update::Battery {
+                        sel,
+                        text,
+                        percent: b.percent(),
+                    });
+                }
+            }
+            // a receiver's device that went to sleep: its disconnect event says so
             Err(e) => crate::verbose(format_args!("battery read failed: {e}")),
         }
     }

@@ -325,7 +325,7 @@ impl App {
         let alert = self.alert_level(&r.sel);
         let pct = r.percent.filter(|_| r.online);
         let charging = r.charging();
-        let drain = r.history.drain_tenths(now).filter(|_| !charging);
+        let drain = r.history.drain_tenths().filter(|_| !charging);
         let corsair = peripheral_lite::corsair::parse_selector(&r.sel).is_some();
         let conn = match r.sel.split_once(':') {
             _ if corsair => "Corsair wireless dongle".into(),

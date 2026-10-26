@@ -807,6 +807,9 @@ fn worker(
     }
 }
 
+/// How often the app wakes to store unchanged battery levels in the history.
+const HISTORY_TICK: Duration = Duration::from_secs(300);
+
 impl eframe::App for App {
     /// Runs before every frame, and also while the window is hidden whenever a repaint is
     /// requested (worker updates, tray clicks), so the tray works with the window hidden.
@@ -820,6 +823,15 @@ impl eframe::App for App {
         }
         self.poll_update(ctx);
         self.update_tray(ctx);
+        // Store the level of online devices now and then even when it does not change, so a
+        // drop after hours at one level still counts as seen (see `History::drain_tenths`).
+        let now = history::now();
+        for r in self.rows.iter_mut().filter(|r| r.online) {
+            if let Some(p) = r.percent {
+                r.history.add(now, p);
+            }
+        }
+        ctx.request_repaint_after(HISTORY_TICK);
         if self.message.as_ref().is_some_and(|m| m.2.elapsed() > MESSAGE_TIME) {
             self.message = None;
         }
